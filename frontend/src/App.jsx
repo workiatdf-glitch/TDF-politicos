@@ -1,0 +1,289 @@
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { 
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area
+} from 'recharts';
+import { RefreshCw, TrendingUp, TrendingDown, Minus, Facebook, Twitter, Instagram, ShieldCheck, Activity } from 'lucide-react';
+import './index.css';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+function App() {
+  const [politicos, setPoliticos] = useState([]);
+  const [selectedPolitico, setSelectedPolitico] = useState(null);
+  const [selectedCategoria, setSelectedCategoria] = useState('');
+  const [metricas, setMetricas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [simulating, setSimulating] = useState(false);
+
+  useEffect(() => {
+    fetchPoliticos();
+  }, [selectedCategoria]);
+
+  useEffect(() => {
+    if (selectedPolitico) {
+      fetchMetricas(selectedPolitico.id);
+    } else {
+      setMetricas([]);
+    }
+  }, [selectedPolitico]);
+
+  const fetchPoliticos = async () => {
+    setLoading(true);
+    try {
+      let url = `${API_URL}/politicos`;
+      if (selectedCategoria) {
+        url += `?categoria=${encodeURIComponent(selectedCategoria)}`;
+      }
+      const response = await axios.get(url);
+      setPoliticos(response.data);
+      if (response.data.length > 0 && !selectedPolitico) {
+        setSelectedPolitico(response.data[0]);
+      }
+    } catch (error) {
+      console.error("Error fetching politicos:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMetricas = async (id) => {
+    try {
+      const response = await axios.get(`${API_URL}/politicos/${id}/metricas`);
+
+      // Agrupar por trimestre
+      const quarterMap = {};
+      response.data.forEach(m => {
+        const date = new Date(m.fecha);
+        const year = date.getFullYear();
+        const quarter = Math.ceil((date.getMonth() + 1) / 3);
+        const key = `${year}-Q${quarter}`;
+        if (!quarterMap[key]) {
+          quarterMap[key] = { positiva: [], neutra: [], negativa: [], year, quarter, fuente: m.fuente };
+        }
+        quarterMap[key].positiva.push(parseFloat(m.imagen_positiva));
+        quarterMap[key].neutra.push(parseFloat(m.imagen_neutra));
+        quarterMap[key].negativa.push(parseFloat(m.imagen_negativa));
+      });
+
+      const avg = arr => arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2) : 0;
+      const quarterNames = ['', 'Ene-Mar', 'Abr-Jun', 'Jul-Sep', 'Oct-Dic'];
+
+      const formattedData = Object.keys(quarterMap)
+        .sort()
+        .map(key => {
+          const q = quarterMap[key];
+          return {
+            fecha_corta: `${quarterNames[q.quarter]} ${q.year}`,
+            positiva: avg(q.positiva),
+            neutra: avg(q.neutra),
+            negativa: avg(q.negativa),
+            fuente: q.fuente
+          };
+        });
+
+      setMetricas(formattedData);
+    } catch (error) {
+      console.error("Error fetching metricas:", error);
+      setMetricas([]);
+    }
+  };
+
+  const handleSimular = async () => {
+    setSimulating(true);
+    try {
+      await axios.post(`${API_URL}/simular`);
+      if (selectedPolitico) {
+        await fetchMetricas(selectedPolitico.id);
+      }
+    } catch (error) {
+      console.error("Error simulando datos:", error);
+    } finally {
+      setSimulating(false);
+    }
+  };
+
+  const categorias = ["", "Primera línea", "Segunda línea", "Tercera línea"];
+
+  if (loading && politicos.length === 0) {
+    return (
+      <div className="loader">
+        <Activity size={48} className="spin" style={{ color: 'var(--primary-accent)', marginBottom: '1rem' }} />
+        <div style={{ letterSpacing: '0.2em', fontWeight: 600 }}>AUDITANDO SOBERANÍA TDF...</div>
+      </div>
+    );
+  }
+
+  const latestMetrica = metricas.length > 0 ? metricas[metricas.length - 1] : null;
+
+  return (
+    <div className="app-container">
+      <header>
+        <div className="title-section">
+          <h1>Análisis Soberano TDF 2.0</h1>
+          <p>Motor de Inteligencia Artificial para Sentiment Analysis Multired</p>
+        </div>
+        <div className="controls-section">
+          <button 
+            className="btn-primary" 
+            onClick={handleSimular}
+            disabled={simulating}
+          >
+            <RefreshCw size={18} className={simulating ? 'spin' : ''} />
+            {simulating ? 'Escaneando redes...' : 'Actualizar Inteligencia'}
+          </button>
+        </div>
+      </header>
+
+      <div className="filters-bar">
+        {categorias.map(cat => (
+          <button
+            key={cat}
+            className={`filter-btn ${selectedCategoria === cat ? 'active' : ''}`}
+            onClick={() => {
+                setSelectedCategoria(cat);
+                setSelectedPolitico(null);
+            }}
+          >
+            {cat === "" ? "Todas las Jerarquías" : cat}
+          </button>
+        ))}
+      </div>
+
+      <div className="dashboard-grid">
+        <div className="card list-card">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+            <h2 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Activity size={18} color="#0ea5e9" /> Directorio Político
+            </h2>
+          </div>
+          <div className="politicos-list">
+            {politicos.map((pol, idx) => (
+              <div 
+                key={pol.id} 
+                className={`politico-item ${selectedPolitico?.id === pol.id ? 'selected' : ''}`}
+                onClick={() => setSelectedPolitico(pol)}
+                style={{ animationDelay: `${idx * 0.05}s` }}
+              >
+                <div className="politico-info">
+                  <h3>{pol.nombre}</h3>
+                  <p>{pol.cargo} • {pol.categoria}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card detail-card">
+          {selectedPolitico ? (
+            <div className="detail-view">
+              <div className="detail-header" style={{ animation: 'slideIn 0.5s ease-out' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--primary-accent)', fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', marginBottom: '8px' }}>
+                    <ShieldCheck size={14} /> Perfil Auditado
+                </div>
+                <h2>{selectedPolitico.nombre}</h2>
+                <p>{selectedPolitico.cargo} | <span style={{color: 'var(--secondary-accent)', fontWeight: 600}}>Sector Fueguino</span></p>
+                
+                <div className="social-sync">
+                    <div className={`social-badge ${simulating ? 'active' : ''}`}><Facebook size={12} /> FB Link</div>
+                    <div className={`social-badge ${simulating ? 'active' : ''}`}><Twitter size={12} /> X Feed</div>
+                    <div className={`social-badge ${simulating ? 'active' : ''}`}><Instagram size={12} /> IG Tags</div>
+                </div>
+              </div>
+
+              {latestMetrica ? (
+                <>
+                  <div className="kpi-row">
+                    <div className="kpi-card pos" style={{ animationDelay: '0.1s' }}>
+                      <TrendingUp size={24} color="var(--color-positive)" />
+                      <div className="kpi-value">{latestMetrica.positiva}%</div>
+                      <div className="kpi-label">Imagen Positiva</div>
+                    </div>
+                    <div className="kpi-card neu" style={{ animationDelay: '0.2s' }}>
+                      <Minus size={24} color="var(--color-neutral)" />
+                      <div className="kpi-value">{latestMetrica.neutra}%</div>
+                      <div className="kpi-label">Dato Neutro</div>
+                    </div>
+                    <div className="kpi-card neg" style={{ animationDelay: '0.3s' }}>
+                      <TrendingDown size={24} color="var(--color-negative)" />
+                      <div className="kpi-value">{latestMetrica.negativa}%</div>
+                      <div className="kpi-label">Sentiment Negativo</div>
+                    </div>
+                  </div>
+
+                  <div className="chart-container" style={{ animation: 'slideIn 0.8s ease-out' }}>
+                    <h3 style={{fontSize: '0.9rem', color: '#94a3b8', marginBottom: '1.5rem', fontWeight: 500}}>
+                      Trazabilidad Temporal de Opinión Pública (IA Multifuente)
+                    </h3>
+                    <ResponsiveContainer width="100%" height={380}>
+                      <AreaChart data={metricas} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="colorPos" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#34d399" stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor="#34d399" stopOpacity={0}/>
+                          </linearGradient>
+                          <linearGradient id="colorNeg" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.35}/>
+                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                        <XAxis 
+                          dataKey="fecha_corta" 
+                          stroke="#475569" 
+                          tick={{fill: '#94a3b8', fontSize: 10}}
+                          minTickGap={30}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis 
+                          domain={[0, 100]} 
+                          stroke="#475569" 
+                          tick={{fill: '#94a3b8', fontSize: 10}}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <Tooltip 
+                          contentStyle={{backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', backdropFilter: 'blur(10px)'}}
+                          itemStyle={{fontWeight: 600}}
+                        />
+                        <Area type="monotone" dataKey="positiva" name="Positiva" stroke="#34d399" strokeWidth={3} fillOpacity={1} fill="url(#colorPos)" dot={false} />
+                        <Area type="monotone" dataKey="negativa" name="Negativa" stroke="#ef4444" strokeWidth={3} fillOpacity={1} fill="url(#colorNeg)" dot={false} />
+
+                      </AreaChart>
+                    </ResponsiveContainer>
+                    <div style={{display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem', alignItems: 'center', flexWrap: 'wrap', gap: '8px'}}>
+                        <p style={{fontSize: '11px', color: '#475569'}}>Firma: TDF Politicos v2.0 — Motor Multifuente</p>
+                        <p style={{fontSize: '11px', color: '#64748b', fontWeight: 600, maxWidth: '60%', textAlign: 'right'}}>
+                            📡 {latestMetrica.fuente}
+                        </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state">
+                  <p>Iniciando auditoría de datos para este perfil...</p>
+                  <button className="btn-primary" onClick={handleSimular} disabled={simulating}>
+                    {simulating ? 'Analizando...' : 'Comenzar Análisis IA'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <ShieldCheck size={64} color="var(--primary-accent)" style={{marginBottom: '20px', opacity: 0.3}} />
+              <div style={{fontSize: '1.2rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '10px'}}>
+                Monitor de Sentimiento en Tiempo Real
+              </div>
+              <p style={{color: 'var(--text-muted)', fontSize: '0.9rem'}}>
+                Selecciona una figura política del directorio para iniciar el análisis profundo de medios locales y redes sociales.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;

@@ -1,0 +1,55 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: tdf_politicos_db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: politicostdf
+    volumes:
+      - ./db_init:/docker-entrypoint-initdb.d
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  cv_engine:
+    build: ./cv-engine
+    container_name: tdf_politicos_cv
+    volumes:
+      - ./cv-engine:/app
+    ports:
+      - "8001:8000"
+    environment:
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+  api:
+    build: ./backend
+    container_name: tdf_politicos_api
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - cv_engine
+    environment:
+      - DATABASE_URL=postgresql://admin:password@db:5432/politicostdf
+      - CV_ENGINE_URL=http://cv_engine:8000
+
+  web:
+    build: ./frontend
+    container_name: tdf_politicos_web
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "6969:6969"
+    depends_on:
+      - api
+    environment:
+      - VITE_API_URL=http://localhost:8000
+
+volumes:
+  db_data:

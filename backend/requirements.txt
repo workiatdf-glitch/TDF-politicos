@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+pandas
+python-dotenv
+httpx
+beautifulsoup4
+duckduckgo-search
+textblob
+requests
