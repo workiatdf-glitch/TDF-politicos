@@ -6,6 +6,6 @@ pandas
 python-dotenv
 httpx
 beautifulsoup4
-duckduckgo-search
+feedparser
 textblob
 requests

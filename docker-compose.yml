@@ -12,7 +12,7 @@ services:
       - ./db_init:/docker-entrypoint-initdb.d
       - db_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5435:5432"
 
   cv_engine:
     build: ./cv-engine
@@ -20,7 +20,7 @@ services:
     volumes:
       - ./cv-engine:/app
     ports:
-      - "8001:8000"
+      - "8011:8000"
     environment:
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
@@ -30,7 +30,7 @@ services:
     volumes:
       - ./backend:/app
     ports:
-      - "8000:8000"
+      - "8010:8000"
     depends_on:
       - db
       - cv_engine
@@ -45,11 +45,11 @@ services:
       - ./frontend:/app
       - /app/node_modules
     ports:
-      - "6969:6969"
+      - "7077:6969"
     depends_on:
       - api
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=http://localhost:8010
 
 volumes:
   db_data:

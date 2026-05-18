@@ -54,3 +54,12 @@ INSERT INTO politicos (id, nombre, cargo, categoria) VALUES
 ('etchepare', 'Claudia Etchepare', 'Sec. General ATSA', 'Tercera línea'),
 ('martinez_o', 'Oscar Martínez', 'Diputado M.C / Referente UOM', 'Tercera línea'),
 ('barrios', 'Dr. Javier Andrés Barrios', 'Sec. Gestión Sist. Sanitarios (Min. Salud)', 'Tercera línea');
+CREATE TABLE menciones_texto (
+    id SERIAL PRIMARY KEY,
+    politico_id VARCHAR(100) REFERENCES politicos(id),
+    fecha DATE NOT NULL,
+    texto TEXT NOT NULL,
+    sentimiento VARCHAR(20), -- 'pos', 'neu', 'neg'
+    fuente VARCHAR(100), -- 'Facebook', 'X', 'Instagram', 'Prensa'
+    url VARCHAR(500)
+);

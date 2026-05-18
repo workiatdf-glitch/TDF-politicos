@@ -233,42 +233,40 @@ async def buscar_menciones(red: str, request: MencionesRequest):
 
     nombre = request.nombre_politico
     variantes = request.variantes or generar_variantes_busqueda(nombre)
-
-    # Usar la primera variante (nombre completo) para la búsqueda principal
-    search_url = construir_url_menciones(red, nombre)
-    if not search_url:
-        return {"politico": nombre, "red": red, "menciones": [], "total_fragmentos": 0}
-
-    page = await browser_context.new_page()
+    
+    # Intentamos con las primeras 2 variantes más probables (Completo y Apellido+TDF)
+    # Esto aumenta drásticamente los hits para nombres específicos como "Di Giglio"
+    intentos = variantes[:2] 
     todos_los_textos = []
-
-    try:
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-        await page.wait_for_timeout(3000)
-
-        # Cerrar popups (especialmente Facebook)
+    
+    for var in intentos:
+        search_url = construir_url_menciones(red, var)
+        if not search_url: continue
+        
+        print(f"  [CV-Engine] {red.upper()}: Intentando búsqueda con variante '{var}'...")
+        page = await browser_context.new_page()
         try:
-            close_selectors = [
-                "[aria-label='Cerrar']", "[aria-label='Close']",
-                "._42ft._4jy0._9o-t", "[data-testid='cookie-policy-manage-dialog-accept-button']"
-            ]
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_timeout(3000)
+
+            # Cerrar popups
+            close_selectors = ["[aria-label='Cerrar']", "[aria-label='Close']", "._42ft._4jy0._9o-t"]
             for sel in close_selectors:
                 btn = page.locator(sel)
                 if await btn.count() > 0:
                     await btn.first.click()
-                    await page.wait_for_timeout(500)
                     break
-        except Exception:
-            pass
 
-        # Captura multi-scroll (3 niveles de profundidad)
-        textos_capturados = await captura_multi_scroll(page, scrolls=3, wait_ms=2500)
-        todos_los_textos.extend(textos_capturados)
-
-    except Exception as e:
-        print(f"Error buscando menciones en {red} para {nombre}: {e}")
-    finally:
-        await page.close()
+            textos_capturados = await captura_multi_scroll(page, scrolls=2, wait_ms=2000)
+            if textos_capturados:
+                todos_los_textos.extend(textos_capturados)
+                await page.close()
+                break # Encontramos resultados, salimos del bucle para ahorrar tiempo
+        except Exception as e:
+            print(f"Error en variante '{var}': {e}")
+        finally:
+            if not page.is_closed():
+                await page.close()
 
     # Filtrar fragmentos que realmente mencionan al político
     menciones_relevantes = []
