@@ -17,8 +17,6 @@ services:
   cv_engine:
     build: ./cv-engine
     container_name: tdf_politicos_cv
-    volumes:
-      - ./cv-engine:/app
     ports:
       - "8011:8000"
     environment:
@@ -27,8 +25,6 @@ services:
   api:
     build: ./backend
     container_name: tdf_politicos_api
-    volumes:
-      - ./backend:/app
     ports:
       - "8010:8000"
     depends_on:
@@ -41,9 +37,6 @@ services:
   web:
     build: ./frontend
     container_name: tdf_politicos_web
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     ports:
       - "7077:6969"
     depends_on:

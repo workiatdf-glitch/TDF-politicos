@@ -56,10 +56,29 @@ INSERT INTO politicos (id, nombre, cargo, categoria) VALUES
 ('barrios', 'Dr. Javier Andrés Barrios', 'Sec. Gestión Sist. Sanitarios (Min. Salud)', 'Tercera línea');
 CREATE TABLE menciones_texto (
     id SERIAL PRIMARY KEY,
-    politico_id VARCHAR(100) REFERENCES politicos(id),
+    politico_id VARCHAR(100) REFERENCES politicos(id) ON DELETE CASCADE,
     fecha DATE NOT NULL,
     texto TEXT NOT NULL,
     sentimiento VARCHAR(20), -- 'pos', 'neu', 'neg'
     fuente VARCHAR(100), -- 'Facebook', 'X', 'Instagram', 'Prensa'
     url VARCHAR(500)
+);
+
+CREATE TABLE debates_publicacion (
+    id SERIAL PRIMARY KEY,
+    politico_id VARCHAR(100) REFERENCES politicos(id) ON DELETE CASCADE,
+    titulo VARCHAR(300) NOT NULL,
+    contenido TEXT,
+    fecha DATE NOT NULL,
+    fuente VARCHAR(100) NOT NULL,
+    url VARCHAR(500)
+);
+
+CREATE TABLE comentarios_debate (
+    id SERIAL PRIMARY KEY,
+    debate_id INTEGER REFERENCES debates_publicacion(id) ON DELETE CASCADE,
+    usuario VARCHAR(100) NOT NULL,
+    texto TEXT NOT NULL,
+    sentimiento VARCHAR(20) NOT NULL,
+    fecha DATE NOT NULL
 );

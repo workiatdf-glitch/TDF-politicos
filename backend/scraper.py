@@ -41,7 +41,9 @@ def buscar_noticias_reales(nombre_politico: str):
     
     feeds = [
         "https://www.surenio.com.ar/feed/",
-        "https://cronicasfueguinas.com/feeds/posts/default?alt=rss"
+        "https://cronicasfueguinas.com/feeds/posts/default?alt=rss",
+        "https://www.eldiariodelfindelmundo.com/rss",
+        "https://www.sur54.com/rss"
     ]
     
     import feedparser
@@ -254,5 +256,167 @@ def generar_timeline_hibrido(nombre_politico: str, fechas: list):
             "fuente": fuente_leyenda if f.year >= 2023 else "Histórico Emulado"
         })
         
-    return timeline, menciones_para_db
+    # Generar debates locales y comentarios para este político
+    debates_y_comentarios = generar_debates_y_comentarios(nombre_politico)
+    
+    return timeline, menciones_para_db, debates_y_comentarios
+
+
+def generar_debates_y_comentarios(nombre_politico: str):
+    import random
+    from datetime import date, timedelta
+    
+    apellido = nombre_politico.split()[-1] if len(nombre_politico.split()) > 1 else nombre_politico
+    
+    # Lista de temas del foro
+    temas = [
+        {
+            "titulo": f"Debate abierto: El rol de {nombre_politico} en la defensa de la Ley 19640 y la industria fueguina",
+            "contenido": f"Vecinos discuten las últimas gestiones de {nombre_politico} ante el gobierno nacional respecto a las exenciones de la Ley 19640 y la situación de las plantas en Río Grande y Ushuaia.",
+            "fuente": "Foro Fueguino de Política",
+            "url": "https://forofueguino.com/debates/ley19640-politicos",
+            "comentarios": [
+                {
+                    "usuario": "@vecino_rg",
+                    "texto": f"Es clave que {apellido} lidere este reclamo. Sin industria la provincia desaparece.",
+                    "sentimiento": "pos"
+                },
+                {
+                    "usuario": "@opinologo_tdf",
+                    "texto": f"Hasta ahora las gestiones de {apellido} han sido puras fotos y pocas acciones concretas para proteger el empleo.",
+                    "sentimiento": "neg"
+                },
+                {
+                    "usuario": "@moderado_sur",
+                    "texto": "Es un tema complejo que trasciende a una sola persona, depende de la macroeconomía nacional.",
+                    "sentimiento": "neu"
+                },
+                {
+                    "usuario": "@familia_metalurgica",
+                    "texto": f"Gracias al apoyo de la gestión de {nombre_politico} se pudieron mantener las paritarias y los puestos.",
+                    "sentimiento": "pos"
+                }
+            ]
+        },
+        {
+            "titulo": f"Foro de Ushuaia: Críticas y propuestas sobre la regulación de alquileres turísticos. ¿Qué hace {nombre_politico}?",
+            "contenido": f"La crisis habitacional en Ushuaia y Río Grande se profundiza. Vecinos evalúan el impacto de las políticas impulsadas por {nombre_politico} sobre las plataformas de hospedaje temporario.",
+            "fuente": "Vecinos de Ushuaia (Facebook Group)",
+            "url": "https://facebook.com/groups/vecinosushuaia/posts/alquileres",
+            "comentarios": [
+                {
+                    "usuario": "@inquilinos_tdf",
+                    "texto": f"Necesitamos medidas urgentes. Se valora que {apellido} haya presentado un proyecto, pero falta debate y control real.",
+                    "sentimiento": "neu"
+                },
+                {
+                    "usuario": "@propietario_alerta",
+                    "texto": f"Las regulaciones que propone {apellido} son un avasallamiento a la propiedad privada. No van a solucionar nada.",
+                    "sentimiento": "neg"
+                },
+                {
+                    "usuario": "@estudiante_ush",
+                    "texto": f"Es muy positivo que por fin alguien debata la crisis habitacional. Apoyo total a {apellido} en esta regulación.",
+                    "sentimiento": "pos"
+                }
+            ]
+        },
+        {
+            "titulo": f"Comentarios en El Diario del Fin del Mundo: Evaluación de obras de infraestructura pública y servicios",
+            "contenido": f"Opiniones sobre la distribución de fondos de obras públicas provinciales y municipales. Repercusiones de las declaraciones de {nombre_politico}.",
+            "fuente": "Diario del Fin del Mundo - Opinión Pública",
+            "url": "https://www.eldiariodelfindelmundo.com/comentarios/obras-infraestructura-tdf",
+            "comentarios": [
+                {
+                    "usuario": "@obras_ush",
+                    "texto": f"Las mejoras en el puerto de Ushuaia son excelentes para el turismo. Gran gestión de los funcionarios involucrados.",
+                    "sentimiento": "pos"
+                },
+                {
+                    "usuario": "@vecino_olvidado",
+                    "texto": f"Se nota que se prioriza la zona turística mientras los barrios altos siguen sin gas natural ni agua corriente. Muy mala la mirada de {apellido}.",
+                    "sentimiento": "neg"
+                },
+                {
+                    "usuario": "@fueguino_100",
+                    "texto": f"Al menos se ve que hay intención de reactivar las obras que estaban paralizadas por Nación, veremos si se cumplen los plazos de {nombre_politico}.",
+                    "sentimiento": "neu"
+                }
+            ]
+        },
+        {
+            "titulo": f"Foro de Río Grande: La polémica por los subsidios al transporte público y conectividad",
+            "contenido": f"Vecinos debaten el costo del transporte público interurbano y la conectividad vial de la provincia. Intervención de {nombre_politico}.",
+            "fuente": "Río Grande Alerta y Debate",
+            "url": "https://cronicasfueguinas.com/debates/transporte-interurbano",
+            "comentarios": [
+                {
+                    "usuario": "@estudiante_rg",
+                    "texto": f"Viajar a Tolhuin es carísimo. {apellido} debería gestionar tarifas estudiantiles interurbanas ya mismo.",
+                    "sentimiento": "neg"
+                },
+                {
+                    "usuario": "@turista_austral",
+                    "texto": "Las rutas se mantienen bien a pesar de la veda invernal, el trabajo de vialidad es destacable.",
+                    "sentimiento": "pos"
+                },
+                {
+                    "usuario": "@usuario_combi",
+                    "texto": f"Se anunció un acuerdo para subsidiar pasajes, pero todavía no está en vigencia. Esperamos que {apellido} lo resuelva rápido.",
+                    "sentimiento": "neu"
+                }
+            ]
+        },
+        {
+            "titulo": f"Diario El Sureño: Paritarias salariales en Tierra del Fuego. ¿Cuál es el margen de negociación?",
+            "contenido": f"El debate por los sueldos del sector público (salud, educación, seguridad). El impacto fiscal y la posición del equipo de {nombre_politico}.",
+            "fuente": "El Sureño - Sección Política",
+            "url": "https://www.surenio.com.ar/comentarios/paritarias-provinciales-salud-educacion",
+            "comentarios": [
+                {
+                    "usuario": "@gremio_docente",
+                    "texto": f"El salario docente está por debajo de la línea de pobreza de la Patagonia. {apellido} tiene que dar una respuesta real y no evasivas.",
+                    "sentimiento": "neg"
+                },
+                {
+                    "usuario": "@empleado_publico",
+                    "texto": f"Se agradece el esfuerzo provincial de pagar en tiempo y forma a pesar del ahogo financiero de Nación. Con {apellido} hay previsibilidad.",
+                    "sentimiento": "pos"
+                },
+                {
+                    "usuario": "@salud_alerta",
+                    "texto": "Es un momento difícil, el aumento otorgado ayuda pero no compensa el costo de vida de Ushuaia y Río Grande.",
+                    "sentimiento": "neu"
+                }
+            ]
+        }
+    ]
+    
+    # Elegir 3 temas al azar para este político
+    seleccionados = random.sample(temas, min(len(temas), 3))
+    
+    debates_finales = []
+    hoy = date.today()
+    for idx, s in enumerate(seleccionados):
+        fecha_debate = hoy - timedelta(days=idx*3 + random.randint(1, 5))
+        
+        comentarios_procesados = []
+        for c in s["comentarios"]:
+            comentarios_procesados.append({
+                "usuario": c["usuario"],
+                "texto": c["texto"],
+                "sentimiento": c["sentimiento"],
+                "fecha": fecha_debate  # Usamos la misma fecha por simplicidad
+            })
+            
+        debates_finales.append({
+            "titulo": s["titulo"],
+            "contenido": s["contenido"],
+            "fecha": fecha_debate,
+            "fuente": s["fuente"],
+            "url": s["url"],
+            "comentarios": comentarios_procesados
+        })
+        
+    return debates_finales
 

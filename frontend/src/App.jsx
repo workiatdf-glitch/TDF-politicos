@@ -3,7 +3,7 @@ import axios from 'axios';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area
 } from 'recharts';
-import { RefreshCw, TrendingUp, TrendingDown, Minus, Facebook, Twitter, Instagram, ShieldCheck, Activity } from 'lucide-react';
+import { RefreshCw, TrendingUp, TrendingDown, Minus, Facebook, Twitter, Instagram, ShieldCheck, Activity, MessageSquare } from 'lucide-react';
 import './index.css';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8010';
@@ -13,6 +13,9 @@ function App() {
   const [selectedPolitico, setSelectedPolitico] = useState(null);
   const [metricas, setMetricas] = useState([]);
   const [mencionesRandom, setMencionesRandom] = useState([]);
+  const [debates, setDebates] = useState([]);
+  const [selectedDebate, setSelectedDebate] = useState(null);
+  const [loadingDebates, setLoadingDebates] = useState(false);
   const [loading, setLoading] = useState(true);
   const [simulating, setSimulating] = useState(false);
   const [scrappearUnoId, setScrappearUnoId] = useState(null);
@@ -32,9 +35,12 @@ function App() {
     if (selectedPolitico) {
       fetchMetricas(selectedPolitico.id);
       fetchMencionesRandom(selectedPolitico.id);
+      fetchDebates(selectedPolitico.id);
     } else {
       setMetricas([]);
       setMencionesRandom([]);
+      setDebates([]);
+      setSelectedDebate(null);
     }
   }, [selectedPolitico]);
 
@@ -108,12 +114,32 @@ function App() {
     }
   };
 
+  const fetchDebates = async (id) => {
+    setLoadingDebates(true);
+    try {
+      const response = await axios.get(`${API_URL}/politicos/${id}/debates`);
+      setDebates(response.data);
+      if (response.data.length > 0) {
+        setSelectedDebate(response.data[0]);
+      } else {
+        setSelectedDebate(null);
+      }
+    } catch (error) {
+      console.error("Error fetching debates:", error);
+      setDebates([]);
+      setSelectedDebate(null);
+    } finally {
+      setLoadingDebates(false);
+    }
+  };
+
   const handleSimular = async () => {
     setSimulating(true);
     try {
       await axios.post(`${API_URL}/simular`);
       if (selectedPolitico) {
         await fetchMetricas(selectedPolitico.id);
+        await fetchDebates(selectedPolitico.id);
       }
     } catch (error) {
       console.error("Error simulando datos:", error);
@@ -128,6 +154,7 @@ function App() {
       await axios.post(`${API_URL}/politicos/${id}/scrappear`);
       await fetchMetricas(id);
       await fetchMencionesRandom(id);
+      await fetchDebates(id);
     } catch (error) {
       console.error("Error actualizando perfil:", error);
     } finally {
@@ -334,6 +361,98 @@ function App() {
                             📡 {latestMetrica?.fuente || 'Sin datos de fuente'}
                         </p>
                     </div>
+                  </div>
+
+                  {/* NUEVA SECCIÓN DE DEBATES Y COMENTARIOS */}
+                  <div className="debates-section" style={{ animation: 'slideIn 0.9s ease-out', marginTop: '2.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem' }}>
+                      <h3 style={{fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'}}>
+                        <MessageSquare size={18} color="var(--primary-accent)" /> Debates y Comentarios en Foros Provinciales
+                      </h3>
+                      <span className="source-counter-badge">{debates.length} Hilos Activos</span>
+                    </div>
+
+                    {debates.length > 0 ? (
+                      <div className="debates-grid">
+                        {/* Lista de Hilos (Izquierda) */}
+                        <div className="debates-list">
+                          {debates.map((d) => (
+                            <div 
+                              key={d.id} 
+                              className={`debate-thread-item ${selectedDebate?.id === d.id ? 'active' : ''}`}
+                              onClick={() => setSelectedDebate(d)}
+                            >
+                              <div className="thread-header">
+                                <span className="thread-source">{d.fuente}</span>
+                                <span className="thread-date">{new Date(d.fecha).toLocaleDateString('es-AR')}</span>
+                              </div>
+                              <h4 className="thread-title">{d.titulo}</h4>
+                              <p className="thread-snippet">{d.contenido?.substring(0, 100)}...</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Comentarios del Hilo Seleccionado (Derecha) */}
+                        <div className="debate-comments-box">
+                          {selectedDebate ? (
+                            <>
+                              <div className="selected-thread-details">
+                                <span className="thread-tag-link">{selectedDebate.fuente}</span>
+                                <h4 style={{margin: '8px 0 6px 0', fontSize: '1.05rem', color: 'var(--primary-accent)'}}>{selectedDebate.titulo}</h4>
+                                <p style={{margin: '0 0 16px 0', fontSize: '0.85rem', color: 'var(--text-muted)'}}>{selectedDebate.contenido}</p>
+                                
+                                {/* Resumen del Sentimiento de los comentarios del debate */}
+                                <div className="debate-sentiment-ratio">
+                                  <span style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Sentimiento de la Comunidad:</span>
+                                  <div className="ratio-bar">
+                                    {(() => {
+                                      const totalComments = selectedDebate.comentarios.length;
+                                      if (totalComments === 0) return <div className="ratio-segment neutral" style={{width: '100%'}}>Sin comentarios</div>;
+                                      const pos = selectedDebate.comentarios.filter(c => c.sentimiento === 'pos').length;
+                                      const neg = selectedDebate.comentarios.filter(c => c.sentimiento === 'neg').length;
+                                      const neu = selectedDebate.comentarios.filter(c => c.sentimiento === 'neu').length;
+                                      const posPct = (pos / totalComments) * 100;
+                                      const negPct = (neg / totalComments) * 100;
+                                      const neuPct = (neu / totalComments) * 100;
+                                      return (
+                                        <>
+                                          {posPct > 0 && <div className="ratio-segment positive" style={{width: `${posPct}%`}} title={`Positivos: ${pos}`}></div>}
+                                          {neuPct > 0 && <div className="ratio-segment neutral" style={{width: `${neuPct}%`}} title={`Neutros: ${neu}`}></div>}
+                                          {negPct > 0 && <div className="ratio-segment negative" style={{width: `${negPct}%`}} title={`Negativos: ${neg}`}></div>}
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="comments-list">
+                                {selectedDebate.comentarios.map((c) => (
+                                  <div key={c.id} className="comment-item">
+                                    <div className="comment-header">
+                                      <div className="user-avatar">{c.usuario.replace('@', '').charAt(0).toUpperCase()}</div>
+                                      <span className="comment-user">{c.usuario}</span>
+                                      <span className={`comment-sentiment-badge ${c.sentimiento}`}>
+                                        {c.sentimiento === 'pos' ? 'positivo' : c.sentimiento === 'neg' ? 'negativo' : 'neutro'}
+                                      </span>
+                                    </div>
+                                    <p className="comment-text">"{c.texto}"</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="empty-comments-state">
+                              Selecciona un hilo de debate a la izquierda para ver los comentarios de los vecinos.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="empty-debates-card">
+                        No se registran foros locales ni discusiones de comentarios procesadas para esta figura. Haz clic en "Actualizar Perfil" para intentar recopilar discusiones ciudadanas.
+                      </div>
+                    )}
                   </div>
 
                   <div className="mentions-audit" style={{ animation: 'slideIn 1.1s ease-out', marginTop: '2.5rem' }}>

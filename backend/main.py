@@ -22,8 +22,9 @@ class Politico(Base):
     nombre = Column(String(200), nullable=False)
     cargo = Column(String(100), nullable=False)
     categoria = Column(String(50), nullable=False)
-    metricas = relationship("MetricaImagen", back_populates="politico")
-    menciones = relationship("MencionTexto", back_populates="politico")
+    metricas = relationship("MetricaImagen", back_populates="politico", cascade="all, delete-orphan")
+    menciones = relationship("MencionTexto", back_populates="politico", cascade="all, delete-orphan")
+    debates = relationship("DebatePublicacion", back_populates="politico", cascade="all, delete-orphan")
 
 class MetricaImagen(Base):
     __tablename__ = "metricas_imagen"
@@ -46,6 +47,31 @@ class MencionTexto(Base):
     fuente = Column(String(100))
     url = Column(String(500))
     politico = relationship("Politico", back_populates="menciones")
+
+class DebatePublicacion(Base):
+    __tablename__ = "debates_publicacion"
+    id = Column(Integer, primary_key=True, index=True)
+    politico_id = Column(String(100), ForeignKey("politicos.id"))
+    titulo = Column(String(300), nullable=False)
+    contenido = Column(String, nullable=True)
+    fecha = Column(Date, nullable=False)
+    fuente = Column(String(100), nullable=False)
+    url = Column(String(500), nullable=True)
+    politico = relationship("Politico", back_populates="debates")
+    comentarios = relationship("ComentarioDebate", back_populates="debate", cascade="all, delete-orphan")
+
+class ComentarioDebate(Base):
+    __tablename__ = "comentarios_debate"
+    id = Column(Integer, primary_key=True, index=True)
+    debate_id = Column(Integer, ForeignKey("debates_publicacion.id"))
+    usuario = Column(String(100), nullable=False)
+    texto = Column(String, nullable=False)
+    sentimiento = Column(String(20), nullable=False)
+    fecha = Column(Date, nullable=False)
+    debate = relationship("DebatePublicacion", back_populates="comentarios")
+
+# Crear tablas si no existen
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="TDF Politicos API")
 
@@ -91,6 +117,31 @@ def read_menciones_random(politico_id: str, limit: int = 5, db: Session = Depend
         return []
     return menciones
 
+@app.get("/politicos/{politico_id}/debates")
+def read_debates(politico_id: str, db: Session = Depends(get_db)):
+    from sqlalchemy.orm import joinedload
+    debates = db.query(DebatePublicacion).filter(DebatePublicacion.politico_id == politico_id).options(joinedload(DebatePublicacion.comentarios)).order_by(DebatePublicacion.fecha.desc()).all()
+    result = []
+    for d in debates:
+        result.append({
+            "id": d.id,
+            "titulo": d.titulo,
+            "contenido": d.contenido,
+            "fecha": d.fecha.isoformat() if d.fecha else None,
+            "fuente": d.fuente,
+            "url": d.url,
+            "comentarios": [
+                {
+                    "id": c.id,
+                    "usuario": c.usuario,
+                    "texto": c.texto,
+                    "sentimiento": c.sentimiento,
+                    "fecha": c.fecha.isoformat() if c.fecha else None
+                } for c in d.comentarios
+            ]
+        })
+    return result
+
 @app.post("/simular")
 async def run_extraccion_real(db: Session = Depends(get_db)):
     # Ya no borramos todo al inicio para no dejar el dashboard vacío 20 minutos
@@ -115,9 +166,15 @@ async def run_extraccion_real(db: Session = Depends(get_db)):
             # Borrar solo lo de este político antes de re-poblar
             db.query(MetricaImagen).filter(MetricaImagen.politico_id == pol.id).delete()
             db.query(MencionTexto).filter(MencionTexto.politico_id == pol.id).delete()
+            
+            # Borrado manual de debates y comentarios para evitar problemas de foreign key
+            debates_ids = [d.id for d in db.query(DebatePublicacion).filter(DebatePublicacion.politico_id == pol.id).all()]
+            if debates_ids:
+                db.query(ComentarioDebate).filter(ComentarioDebate.debate_id.in_(debates_ids)).delete(synchronize_session=False)
+            db.query(DebatePublicacion).filter(DebatePublicacion.politico_id == pol.id).delete(synchronize_session=False)
             db.commit()
 
-            timeline_generada, menciones_generadas = scraper.generar_timeline_hibrido(pol.nombre, fechas)
+            timeline_generada, menciones_generadas, debates_generados = scraper.generar_timeline_hibrido(pol.nombre, fechas)
             
             for t in timeline_generada:
                 metrica = MetricaImagen(
@@ -139,6 +196,28 @@ async def run_extraccion_real(db: Session = Depends(get_db)):
                     fuente=m["red"]
                 )
                 db.add(mencion)
+
+            for d_gen in debates_generados:
+                debate = DebatePublicacion(
+                    politico_id=pol.id,
+                    titulo=d_gen["titulo"],
+                    contenido=d_gen["contenido"],
+                    fecha=d_gen["fecha"],
+                    fuente=d_gen["fuente"],
+                    url=d_gen["url"]
+                )
+                db.add(debate)
+                db.flush()  # Para obtener el id del debate recién insertado
+                
+                for c_gen in d_gen["comentarios"]:
+                    comentario = ComentarioDebate(
+                        debate_id=debate.id,
+                        usuario=c_gen["usuario"],
+                        texto=c_gen["texto"],
+                        sentimiento=c_gen["sentimiento"],
+                        fecha=c_gen["fecha"]
+                    )
+                    db.add(comentario)
             
             # Commit por cada político para que la UI se actualice progresivamente
             db.commit()
@@ -173,9 +252,15 @@ async def run_scrappear_uno(politico_id: str, db: Session = Depends(get_db)):
     try:
         db.query(MetricaImagen).filter(MetricaImagen.politico_id == pol.id).delete()
         db.query(MencionTexto).filter(MencionTexto.politico_id == pol.id).delete()
+        
+        # Borrado manual de debates y comentarios
+        debates_ids = [d.id for d in db.query(DebatePublicacion).filter(DebatePublicacion.politico_id == pol.id).all()]
+        if debates_ids:
+            db.query(ComentarioDebate).filter(ComentarioDebate.debate_id.in_(debates_ids)).delete(synchronize_session=False)
+        db.query(DebatePublicacion).filter(DebatePublicacion.politico_id == pol.id).delete(synchronize_session=False)
         db.commit()
 
-        timeline_generada, menciones_generadas = scraper.generar_timeline_hibrido(pol.nombre, fechas)
+        timeline_generada, menciones_generadas, debates_generados = scraper.generar_timeline_hibrido(pol.nombre, fechas)
         
         for t in timeline_generada:
             db.add(MetricaImagen(
@@ -189,6 +274,28 @@ async def run_scrappear_uno(politico_id: str, db: Session = Depends(get_db)):
                 politico_id=pol.id, fecha=date.today(),
                 texto=m["texto"], sentimiento=m["sentimiento"], fuente=m["red"]
             ))
+
+        for d_gen in debates_generados:
+            debate = DebatePublicacion(
+                politico_id=pol.id,
+                titulo=d_gen["titulo"],
+                contenido=d_gen["contenido"],
+                fecha=d_gen["fecha"],
+                fuente=d_gen["fuente"],
+                url=d_gen["url"]
+            )
+            db.add(debate)
+            db.flush()
+            
+            for c_gen in d_gen["comentarios"]:
+                comentario = ComentarioDebate(
+                    debate_id=debate.id,
+                    usuario=c_gen["usuario"],
+                    texto=c_gen["texto"],
+                    sentimiento=c_gen["sentimiento"],
+                    fecha=c_gen["fecha"]
+                )
+                db.add(comentario)
         
         db.commit()
         return {"status": "success", "mensaje": f"Perfil de {pol.nombre} actualizado."}
@@ -223,9 +330,7 @@ async def swap_politico(req: PoliticoSwapRequest, db: Session = Depends(get_db))
     old_categoria = old_pol.categoria
     
     try:
-        db.query(MetricaImagen).filter(MetricaImagen.politico_id == req.old_id).delete()
-        db.query(MencionTexto).filter(MencionTexto.politico_id == req.old_id).delete()
-        
+        # Al borrar old_pol, se eliminan en cascada sus métricas, menciones, debates y comentarios gracias a la relación cascade="all, delete-orphan"
         db.delete(old_pol)
         db.commit()
         
@@ -248,7 +353,7 @@ async def swap_politico(req: PoliticoSwapRequest, db: Session = Depends(get_db))
             year_add = 1 if current_date.month == 12 else 0
             current_date = date(current_date.year + year_add, next_month, 1)
             
-        timeline_generada, menciones_generadas = scraper.generar_timeline_hibrido(new_pol.nombre, fechas)
+        timeline_generada, menciones_generadas, debates_generados = scraper.generar_timeline_hibrido(new_pol.nombre, fechas)
         
         for t in timeline_generada:
             db.add(MetricaImagen(
@@ -262,6 +367,28 @@ async def swap_politico(req: PoliticoSwapRequest, db: Session = Depends(get_db))
                 politico_id=new_pol.id, fecha=date.today(),
                 texto=m["texto"], sentimiento=m["sentimiento"], fuente=m["red"]
             ))
+
+        for d_gen in debates_generados:
+            debate = DebatePublicacion(
+                politico_id=new_pol.id,
+                titulo=d_gen["titulo"],
+                contenido=d_gen["contenido"],
+                fecha=d_gen["fecha"],
+                fuente=d_gen["fuente"],
+                url=d_gen["url"]
+            )
+            db.add(debate)
+            db.flush()
+            
+            for c_gen in d_gen["comentarios"]:
+                comentario = ComentarioDebate(
+                    debate_id=debate.id,
+                    usuario=c_gen["usuario"],
+                    texto=c_gen["texto"],
+                    sentimiento=c_gen["sentimiento"],
+                    fecha=c_gen["fecha"]
+                )
+                db.add(comentario)
             
         db.commit()
         return {"status": "success", "mensaje": f"Se reemplazó a {old_pol.nombre} por {new_pol.nombre}.", "new_id": new_id, "new_politico": {"id": new_id, "nombre": new_pol.nombre, "cargo": new_pol.cargo, "categoria": new_pol.categoria}}
