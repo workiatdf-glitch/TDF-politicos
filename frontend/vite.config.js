@@ -8,5 +8,13 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 6969,
     strictPort: true,
+    allowedHosts: true,
+    proxy: {
+      '/api-proxy': {
+        target: 'http://api:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-proxy/, ''),
+      }
+    }
   }
 })

@@ -1,14 +1,47 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area
 } from 'recharts';
-import { RefreshCw, TrendingUp, TrendingDown, Minus, Facebook, Twitter, Instagram, ShieldCheck, Activity, MessageSquare } from 'lucide-react';
+import { 
+  RefreshCw, TrendingUp, TrendingDown, Minus, Facebook, Twitter, Instagram, 
+  ShieldCheck, Activity, MessageSquare, Globe, MapPin, Lock, Unlock, 
+  UserCheck, Send, CheckCircle2, XCircle, ArrowLeftRight, Search, X
+} from 'lucide-react';
 import './index.css';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8010';
+const API_URL = (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+  ? '/api-proxy'
+  : (import.meta.env.VITE_API_URL || 'http://localhost:8010');
 
 function App() {
+  // Ámbito: 'tdf' o 'nacional'
+  const [ambito, setAmbito] = useState('tdf');
+  const [busqueda, setBusqueda] = useState('');
+
+  // Autenticación / Perfiles (Por defecto inicia como Administrador o guardado en localStorage)
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = localStorage.getItem('tdf_user_profile');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {
+      username: 'admin',
+      nombre_mostrar: 'Administrador General',
+      rol: 'admin'
+    };
+  });
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [loginUsername, setLoginUsername] = useState('equipo');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [usuariosList, setUsuariosList] = useState([]);
+  const [nuevoUserNombre, setNuevoUserNombre] = useState('');
+  const [nuevoUserLogin, setNuevoUserLogin] = useState('');
+  const [nuevoUserPass, setNuevoUserPass] = useState('');
+  const [userCreateMsg, setUserCreateMsg] = useState('');
+
+  // Datos principales
   const [politicos, setPoliticos] = useState([]);
   const [selectedPolitico, setSelectedPolitico] = useState(null);
   const [metricas, setMetricas] = useState([]);
@@ -20,22 +53,50 @@ function App() {
   const [simulating, setSimulating] = useState(false);
   const [scrappearUnoId, setScrappearUnoId] = useState(null);
   const [loadingMenciones, setLoadingMenciones] = useState(false);
+
+  // Modal Swap Directo (Solo Admin)
   const [showSwapModal, setShowSwapModal] = useState(false);
   const [newNombre, setNewNombre] = useState('');
   const [newCargo, setNewCargo] = useState('');
   const [swapping, setSwapping] = useState(false);
   const [swapError, setSwapError] = useState('');
 
+  // Panel Lateral: Solicitudes de Directorio & Chat Interno
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [drawerTab, setDrawerTab] = useState('solicitudes'); // 'solicitudes' | 'chat'
+  const [solicitudes, setSolicitudes] = useState([]);
+  const [mensajesChat, setMensajesChat] = useState([]);
+  const [nuevoMensajeChat, setNuevoMensajeChat] = useState('');
+  
+  // Formulario de Nueva Solicitud de Cambio
+  const [solOldPoliticoId, setSolOldPoliticoId] = useState('');
+  const [solNewNombre, setSolNewNombre] = useState('');
+  const [solNewCargo, setSolNewCargo] = useState('');
+  const [solMotivo, setSolMotivo] = useState('');
+  const [enviandoSolicitud, setEnviandoSolicitud] = useState(false);
+  const [solFeedback, setSolFeedback] = useState('');
+  const [notasAdmin, setNotasAdmin] = useState({});
+  const [resolviendoId, setResolviendoId] = useState(null);
+
+  const isAdmin = currentUser?.rol === 'admin';
 
   useEffect(() => {
-    fetchPoliticos();
-  }, []);
+    localStorage.setItem('tdf_user_profile', JSON.stringify(currentUser));
+  }, [currentUser]);
+
+  useEffect(() => {
+    fetchPoliticos(ambito);
+    fetchSolicitudes();
+    fetchChat();
+    fetchUsuarios();
+  }, [ambito]);
 
   useEffect(() => {
     if (selectedPolitico) {
       fetchMetricas(selectedPolitico.id);
       fetchMencionesRandom(selectedPolitico.id);
       fetchDebates(selectedPolitico.id);
+      setSolOldPoliticoId(selectedPolitico.id);
     } else {
       setMetricas([]);
       setMencionesRandom([]);
@@ -44,14 +105,18 @@ function App() {
     }
   }, [selectedPolitico]);
 
-  const fetchPoliticos = async () => {
+  const fetchPoliticos = async (ambitoActual = ambito) => {
     setLoading(true);
     try {
-      let url = `${API_URL}/politicos`;
-      const response = await axios.get(url);
+      const response = await axios.get(`${API_URL}/politicos`, {
+        params: { ambito: ambitoActual }
+      });
       setPoliticos(response.data);
-      if (response.data.length > 0 && !selectedPolitico) {
+      if (response.data.length > 0) {
         setSelectedPolitico(response.data[0]);
+        setSolOldPoliticoId(response.data[0].id);
+      } else {
+        setSelectedPolitico(null);
       }
     } catch (error) {
       console.error("Error fetching politicos:", error);
@@ -60,11 +125,61 @@ function App() {
     }
   };
 
+  const fetchSolicitudes = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/solicitudes`);
+      setSolicitudes(response.data);
+    } catch (error) {
+      console.error("Error fetching solicitudes:", error);
+    }
+  };
+
+  const fetchChat = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/chat`);
+      setMensajesChat(response.data);
+    } catch (error) {
+      console.error("Error fetching chat:", error);
+    }
+  };
+
+  const fetchUsuarios = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/usuarios`);
+      setUsuariosList(response.data);
+    } catch (error) {
+      console.error("Error fetching usuarios:", error);
+    }
+  };
+
+  const handleCrearUsuario = async (e) => {
+    e.preventDefault();
+    setUserCreateMsg('');
+    if (!nuevoUserNombre.trim() || !nuevoUserLogin.trim() || !nuevoUserPass.trim()) {
+      setUserCreateMsg('Completa nombre, usuario y contraseña.');
+      return;
+    }
+    try {
+      await axios.post(`${API_URL}/usuarios`, {
+        username: nuevoUserLogin.trim(),
+        nombre_mostrar: nuevoUserNombre.trim(),
+        password: nuevoUserPass.trim(),
+        rol: 'visualizador'
+      });
+      setUserCreateMsg(`✅ Credencial creada: usuario "${nuevoUserLogin.trim().toLowerCase()}"`);
+      setNuevoUserNombre('');
+      setNuevoUserLogin('');
+      setNuevoUserPass('');
+      await fetchUsuarios();
+    } catch (error) {
+      setUserCreateMsg(error.response?.data?.detail || 'Error al crear usuario');
+    }
+  };
+
   const fetchMetricas = async (id) => {
     try {
       const response = await axios.get(`${API_URL}/politicos/${id}/metricas`);
 
-      // Agrupar por trimestre
       const quarterMap = {};
       response.data.forEach(m => {
         const date = new Date(m.fecha);
@@ -134,9 +249,10 @@ function App() {
   };
 
   const handleSimular = async () => {
+    if (!isAdmin) return;
     setSimulating(true);
     try {
-      await axios.post(`${API_URL}/simular`);
+      await axios.post(`${API_URL}/simular`, null, { params: { ambito } });
       if (selectedPolitico) {
         await fetchMetricas(selectedPolitico.id);
         await fetchDebates(selectedPolitico.id);
@@ -149,6 +265,7 @@ function App() {
   };
 
   const handleScrappearUno = async (id) => {
+    if (!isAdmin) return;
     setScrappearUnoId(id);
     try {
       await axios.post(`${API_URL}/politicos/${id}/scrappear`);
@@ -164,6 +281,7 @@ function App() {
 
   const handleSwap = async (e) => {
     e.preventDefault();
+    if (!isAdmin) return;
     if (!newNombre.trim() || !newCargo.trim()) {
       setSwapError("Por favor completa todos los campos.");
       return;
@@ -177,7 +295,7 @@ function App() {
         new_cargo: newCargo.trim()
       });
       if (response.data.status === "success") {
-        await fetchPoliticos();
+        await fetchPoliticos(ambito);
         const nuevo = response.data.new_politico;
         setSelectedPolitico(nuevo);
         setShowSwapModal(false);
@@ -190,55 +308,230 @@ function App() {
     }
   };
 
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    try {
+      const response = await axios.post(`${API_URL}/auth/login`, {
+        username: loginUsername,
+        password: loginPassword
+      });
+      setCurrentUser(response.data);
+      setShowAuthModal(false);
+      setLoginPassword('');
+    } catch (error) {
+      setLoginError(error.response?.data?.detail || 'Credenciales inválidas');
+    }
+  };
 
-  const categorias = ["", "Primera línea", "Segunda línea", "Tercera línea"];
+  const handleCrearSolicitud = async (e) => {
+    e.preventDefault();
+    if (!solOldPoliticoId || !solNewNombre.trim() || !solNewCargo.trim() || !solMotivo.trim()) {
+      setSolFeedback('Completa todos los campos de la solicitud.');
+      return;
+    }
+    setEnviandoSolicitud(true);
+    setSolFeedback('');
+    try {
+      await axios.post(`${API_URL}/solicitudes`, {
+        autor_nombre: currentUser.nombre_mostrar,
+        autor_rol: currentUser.rol,
+        ambito: ambito,
+        old_politico_id: solOldPoliticoId,
+        new_politico_nombre: solNewNombre.trim(),
+        new_politico_cargo: solNewCargo.trim(),
+        motivo: solMotivo.trim()
+      });
+      setSolNewNombre('');
+      setSolNewCargo('');
+      setSolMotivo('');
+      setSolFeedback('✅ Solicitud enviada al Administrador y publicada en el chat interno.');
+      await fetchSolicitudes();
+      await fetchChat();
+    } catch (error) {
+      setSolFeedback(error.response?.data?.detail || 'Error al enviar la solicitud.');
+    } finally {
+      setEnviandoSolicitud(false);
+    }
+  };
+
+  const handleResolverSolicitud = async (solicitudId, accion) => {
+    if (!isAdmin) return;
+    setResolviendoId(solicitudId);
+    try {
+      const nota = notasAdmin[solicitudId] || '';
+      const response = await axios.post(`${API_URL}/solicitudes/${solicitudId}/resolver`, {
+        accion,
+        nota_admin: nota,
+        admin_nombre: currentUser.nombre_mostrar
+      });
+      await fetchSolicitudes();
+      await fetchChat();
+      if (accion === 'aprobar') {
+        await fetchPoliticos(ambito);
+        if (response.data.new_politico && response.data.new_politico.ambito === ambito) {
+          setSelectedPolitico(response.data.new_politico);
+        }
+      }
+    } catch (error) {
+      alert(error.response?.data?.detail || 'No se pudo procesar la solicitud.');
+    } finally {
+      setResolviendoId(null);
+    }
+  };
+
+  const handleEnviarMensajeChat = async (e) => {
+    e.preventDefault();
+    if (!nuevoMensajeChat.trim()) return;
+    try {
+      await axios.post(`${API_URL}/chat`, {
+        autor_nombre: currentUser.nombre_mostrar,
+        autor_rol: currentUser.rol,
+        ambito: ambito,
+        texto: nuevoMensajeChat.trim()
+      });
+      setNuevoMensajeChat('');
+      await fetchChat();
+    } catch (error) {
+      console.error("Error enviando mensaje:", error);
+    }
+  };
+
+  const abrirSolicitudParaPolitico = (pol) => {
+    if (pol) {
+      setSolOldPoliticoId(pol.id);
+    }
+    setDrawerTab('solicitudes');
+    setShowDrawer(true);
+  };
+
+  const politicosFiltrados = politicos.filter(p => 
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+    p.cargo.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  const pendientesCount = solicitudes.filter(s => s.estado === 'pendiente').length;
+  const latestMetrica = metricas.length > 0 ? metricas[metricas.length - 1] : null;
 
   if (loading && politicos.length === 0) {
     return (
       <div className="loader">
         <Activity size={48} className="spin" style={{ color: 'var(--primary-accent)', marginBottom: '1rem' }} />
-        <div style={{ letterSpacing: '0.2em', fontWeight: 600 }}>AUDITANDO SOBERANÍA TDF...</div>
+        <div style={{ letterSpacing: '0.2em', fontWeight: 600 }}>AUDITANDO INTELIGENCIA POLÍTICA...</div>
       </div>
     );
   }
 
-  const latestMetrica = metricas.length > 0 ? metricas[metricas.length - 1] : null;
-
   return (
     <div className="app-container">
+      {/* BARRA SUPERIOR DE ÁMBITO Y PERFIL DE USUARIO */}
+      <div className="top-nav-bar">
+        <div className="scope-selector" role="tablist" aria-label="Selector de Ámbito Territorial">
+          <button
+            type="button"
+            className={`scope-tab ${ambito === 'tdf' ? 'active' : ''}`}
+            onClick={() => { setBusqueda(''); setAmbito('tdf'); }}
+          >
+            <MapPin size={16} />
+            <span>Ámbito Tierra del Fuego</span>
+            <span className="scope-pill">Provincial</span>
+          </button>
+          <button
+            type="button"
+            className={`scope-tab ${ambito === 'nacional' ? 'active' : ''}`}
+            onClick={() => { setBusqueda(''); setAmbito('nacional'); }}
+          >
+            <Globe size={16} />
+            <span>Ámbito Nacional</span>
+            <span className="scope-pill national">Elecciones 2027</span>
+          </button>
+        </div>
+
+        <div className="user-controls-bar">
+          <button
+            type="button"
+            className="btn-requests-drawer"
+            onClick={() => {
+              fetchSolicitudes();
+              fetchChat();
+              setShowDrawer(true);
+            }}
+          >
+            <MessageSquare size={16} />
+            <span>Solicitudes de Directorio & Chat</span>
+            {pendientesCount > 0 && (
+              <span className="pending-badge">{pendientesCount}</span>
+            )}
+          </button>
+
+          <div className={`user-profile-chip ${isAdmin ? 'admin' : 'viewer'}`} onClick={() => setShowAuthModal(true)} title="Haz clic para cambiar entre perfil Administrador y Visualizador">
+            {isAdmin ? <Unlock size={15} /> : <Lock size={15} />}
+            <div className="user-chip-text">
+              <span className="user-chip-name">{currentUser.nombre_mostrar}</span>
+              <span className="user-chip-role">{isAdmin ? 'Administrador' : 'Visualizador'}</span>
+            </div>
+            <span className="switch-role-link">Cambiar</span>
+          </div>
+        </div>
+      </div>
+
       <header>
         <div className="title-section">
-          <h1>Análisis Soberano TDF 2.0</h1>
-          <p>Motor de Inteligencia Artificial para Sentiment Analysis Multired</p>
+          <h1>
+            {ambito === 'tdf' ? 'Análisis Soberano TDF 2.0' : 'Monitor Electoral Nacional 2.0'}
+          </h1>
+          <p>
+            {ambito === 'tdf'
+              ? 'Motor de Inteligencia Artificial para Sentiment Analysis Provincial y Foros Fueguinos'
+              : 'Evaluación Federal de Candidatos Nacionales — Infobae, La Nación, Clarín, Página/12, Ámbito y Redes'}
+          </p>
         </div>
         <div className="controls-section">
-          <button 
-            className="btn-primary" 
-            onClick={handleSimular}
-            disabled={simulating}
-          >
-            <RefreshCw size={18} className={simulating ? 'spin' : ''} />
-            {simulating ? 'Escaneando redes...' : 'Actualizar Inteligencia'}
-          </button>
+          {isAdmin ? (
+            <button 
+              className="btn-primary" 
+              onClick={handleSimular}
+              disabled={simulating}
+            >
+              <RefreshCw size={18} className={simulating ? 'spin' : ''} />
+              {simulating ? 'Escaneando medios...' : `Actualizar Inteligencia (${ambito === 'tdf' ? 'TDF' : 'Nacional'})`}
+            </button>
+          ) : (
+            <div className="viewer-readonly-banner">
+              <Lock size={15} />
+              <span>Modo Visualizador — Usa <strong>Solicitudes de Directorio</strong> para proponer cambios</span>
+            </div>
+          )}
         </div>
       </header>
 
-
-
       <div className="dashboard-grid">
         <div className="card list-card">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-            <h2 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Activity size={18} color="#0ea5e9" /> Directorio Político
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+            <h2 style={{ margin: 0, fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Activity size={18} color="#0ea5e9" /> 
+              {ambito === 'tdf' ? 'Directorio Político TDF' : 'Candidatos y Referentes Nacionales'}
             </h2>
+            <span className="source-counter-badge">{politicosFiltrados.length}</span>
           </div>
+
+          <div className="directory-search-box">
+            <Search size={15} className="search-icon" />
+            <input
+              type="text"
+              placeholder={ambito === 'tdf' ? "Buscar referente o cargo en TDF..." : "Buscar candidato o alianza nacional..."}
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+            />
+          </div>
+
           <div className="politicos-list">
-            {politicos.map((pol, idx) => (
+            {politicosFiltrados.map((pol, idx) => (
               <div 
                 key={pol.id} 
                 className={`politico-item ${selectedPolitico?.id === pol.id ? 'selected' : ''}`}
                 onClick={() => setSelectedPolitico(pol)}
-                style={{ animationDelay: `${idx * 0.05}s` }}
+                style={{ animationDelay: `${idx * 0.03}s` }}
               >
                 <div className="politico-info">
                   <h3>{pol.nombre}</h3>
@@ -254,43 +547,65 @@ function App() {
             <div className="detail-view">
               <div className="detail-header" style={{ animation: 'slideIn 0.5s ease-out' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--primary-accent)', fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', marginBottom: '8px' }}>
-                    <ShieldCheck size={14} /> Perfil Auditado
+                  <ShieldCheck size={14} /> Perfil Auditado — {ambito === 'tdf' ? 'Jurisdicción Tierra del Fuego' : 'Escenario Electoral Nacional'}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                        <h2>{selectedPolitico.nombre}</h2>
-                        <p>{selectedPolitico.cargo} | <span style={{color: 'var(--secondary-accent)', fontWeight: 600}}>Sector Fueguino</span></p>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                        <button 
-                            className="filter-btn" 
-                            style={{ background: 'rgba(52, 211, 153, 0.1)', color: 'var(--primary-accent)', borderColor: 'rgba(52, 211, 153, 0.3)', margin: 0 }}
-                            onClick={() => handleScrappearUno(selectedPolitico.id)}
-                            disabled={scrappearUnoId === selectedPolitico.id}
-                        >
-                            <RefreshCw size={14} className={scrappearUnoId === selectedPolitico.id ? 'spin' : ''} style={{marginRight: '8px'}} />
-                            {scrappearUnoId === selectedPolitico.id ? 'Refrescando...' : 'Actualizar Perfil'}
-                        </button>
-                        <button 
-                            className="filter-btn" 
-                            style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)', margin: 0 }}
-                            onClick={() => {
-                              setNewNombre('');
-                              setNewCargo('');
-                              setSwapError('');
-                              setShowSwapModal(true);
-                            }}
-                        >
-                            Reemplazar Figura
-                        </button>
-                    </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+                  <div>
+                    <h2>{selectedPolitico.nombre}</h2>
+                    <p>
+                      {selectedPolitico.cargo} |{' '}
+                      <span style={{color: 'var(--secondary-accent)', fontWeight: 600}}>
+                        {ambito === 'tdf' ? 'Sector Fueguino' : 'Proyección Nacional'}
+                      </span>
+                    </p>
+                  </div>
 
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+                    {isAdmin ? (
+                      <>
+                        <button 
+                          className="filter-btn" 
+                          style={{ background: 'rgba(52, 211, 153, 0.1)', color: 'var(--primary-accent)', borderColor: 'rgba(52, 211, 153, 0.3)', margin: 0, display: 'flex', alignItems: 'center' }}
+                          onClick={() => handleScrappearUno(selectedPolitico.id)}
+                          disabled={scrappearUnoId === selectedPolitico.id}
+                        >
+                          <RefreshCw size={14} className={scrappearUnoId === selectedPolitico.id ? 'spin' : ''} style={{marginRight: '8px'}} />
+                          {scrappearUnoId === selectedPolitico.id ? 'Refrescando...' : 'Actualizar Perfil'}
+                        </button>
+                        <button 
+                          className="filter-btn" 
+                          style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}
+                          onClick={() => {
+                            setNewNombre('');
+                            setNewCargo('');
+                            setSwapError('');
+                            setShowSwapModal(true);
+                          }}
+                        >
+                          <ArrowLeftRight size={14} />
+                          Reemplazar Figura
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="filter-btn"
+                        style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#c4b5fd', borderColor: 'rgba(139, 92, 246, 0.4)', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}
+                        onClick={() => abrirSolicitudParaPolitico(selectedPolitico)}
+                      >
+                        <ArrowLeftRight size={14} />
+                        Solicitar Cambio de esta Figura
+                      </button>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="social-sync">
-                    <div className={`social-badge ${simulating ? 'active' : ''}`}><Facebook size={12} /> FB Link</div>
-                    <div className={`social-badge ${simulating ? 'active' : ''}`}><Twitter size={12} /> X Feed</div>
-                    <div className={`social-badge ${simulating ? 'active' : ''}`}><Instagram size={12} /> IG Tags</div>
+                  <div className={`social-badge ${simulating ? 'active' : ''}`}><Facebook size={12} /> FB Link</div>
+                  <div className={`social-badge ${simulating ? 'active' : ''}`}><Twitter size={12} /> X Feed</div>
+                  <div className={`social-badge ${simulating ? 'active' : ''}`}><Instagram size={12} /> IG Tags</div>
+                  <div className="social-badge" style={{ color: 'var(--primary-accent)', borderColor: 'rgba(52, 211, 153, 0.25)' }}>
+                    {ambito === 'tdf' ? '📰 El Sureño / EDFM / Sur54' : '📰 Infobae / LN / Clarín / P12 / Ámbito'}
+                  </div>
                 </div>
               </div>
 
@@ -300,23 +615,23 @@ function App() {
                     <div className="kpi-card pos" style={{ animationDelay: '0.1s' }}>
                       <TrendingUp size={24} color="var(--color-positive)" />
                       <div className="kpi-value">{latestMetrica?.positiva || 0}%</div>
-                      <div className="kpi-label">Imagen Positiva</div>
+                      <div className="kpi-label">Afinidad Positiva</div>
                     </div>
                     <div className="kpi-card neu" style={{ animationDelay: '0.2s' }}>
                       <Minus size={24} color="var(--color-neutral)" />
                       <div className="kpi-value">{latestMetrica?.neutra || 0}%</div>
-                      <div className="kpi-label">Dato Neutro</div>
+                      <div className="kpi-label"> Neutral / Expectativa</div>
                     </div>
                     <div className="kpi-card neg" style={{ animationDelay: '0.3s' }}>
                       <TrendingDown size={24} color="var(--color-negative)" />
                       <div className="kpi-value">{latestMetrica?.negativa || 0}%</div>
-                      <div className="kpi-label">Sentiment Negativo</div>
+                      <div className="kpi-label">Rechazo / Negativo</div>
                     </div>
                   </div>
 
                   <div className="chart-container" style={{ animation: 'slideIn 0.8s ease-out' }}>
                     <h3 style={{fontSize: '0.9rem', color: '#94a3b8', marginBottom: '1.5rem', fontWeight: 500}}>
-                      Trazabilidad Temporal de Opinión Pública (IA Multifuente)
+                      Trazabilidad Temporal de Opinión Pública ({ambito === 'tdf' ? 'Medios y Redes TDF' : 'Medios Nacionales y Redes'})
                     </h3>
                     <ResponsiveContainer width="100%" height={380}>
                       <AreaChart data={metricas} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -352,29 +667,30 @@ function App() {
                         />
                         <Area type="monotone" dataKey="positiva" name="Positiva" stroke="#34d399" strokeWidth={3} fillOpacity={1} fill="url(#colorPos)" dot={false} />
                         <Area type="monotone" dataKey="negativa" name="Negativa" stroke="#ef4444" strokeWidth={3} fillOpacity={1} fill="url(#colorNeg)" dot={false} />
-
                       </AreaChart>
                     </ResponsiveContainer>
                     <div style={{display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem', alignItems: 'center', flexWrap: 'wrap', gap: '8px'}}>
-                        <p style={{fontSize: '11px', color: '#475569'}}>Firma: TDF Politicos v2.0 — Motor Multifuente</p>
-                        <p style={{fontSize: '11px', color: '#64748b', fontWeight: 600, maxWidth: '60%', textAlign: 'right'}}>
-                            📡 {latestMetrica?.fuente || 'Sin datos de fuente'}
-                        </p>
+                      <p style={{fontSize: '11px', color: '#475569'}}>Firma: TDF & Nacional Politicos v2.0 — Motor Multifuente</p>
+                      <p style={{fontSize: '11px', color: '#64748b', fontWeight: 600, maxWidth: '65%', textAlign: 'right'}}>
+                        📡 {latestMetrica?.fuente || 'Sin datos de fuente'}
+                      </p>
                     </div>
                   </div>
 
-                  {/* NUEVA SECCIÓN DE DEBATES Y COMENTARIOS */}
+                  {/* SECCIÓN DE DEBATES Y COMENTARIOS */}
                   <div className="debates-section" style={{ animation: 'slideIn 0.9s ease-out', marginTop: '2.5rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem' }}>
                       <h3 style={{fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'}}>
-                        <MessageSquare size={18} color="var(--primary-accent)" /> Debates y Comentarios en Foros Provinciales
+                        <MessageSquare size={18} color="var(--primary-accent)" /> 
+                        {ambito === 'tdf'
+                          ? 'Debates y Comentarios en Foros Provinciales (TDF)'
+                          : 'Debates y Comentarios en Portales y Foros Nacionales'}
                       </h3>
                       <span className="source-counter-badge">{debates.length} Hilos Activos</span>
                     </div>
 
                     {debates.length > 0 ? (
                       <div className="debates-grid">
-                        {/* Lista de Hilos (Izquierda) */}
                         <div className="debates-list">
                           {debates.map((d) => (
                             <div 
@@ -392,7 +708,6 @@ function App() {
                           ))}
                         </div>
 
-                        {/* Comentarios del Hilo Seleccionado (Derecha) */}
                         <div className="debate-comments-box">
                           {selectedDebate ? (
                             <>
@@ -401,7 +716,6 @@ function App() {
                                 <h4 style={{margin: '8px 0 6px 0', fontSize: '1.05rem', color: 'var(--primary-accent)'}}>{selectedDebate.titulo}</h4>
                                 <p style={{margin: '0 0 16px 0', fontSize: '0.85rem', color: 'var(--text-muted)'}}>{selectedDebate.contenido}</p>
                                 
-                                {/* Resumen del Sentimiento de los comentarios del debate */}
                                 <div className="debate-sentiment-ratio">
                                   <span style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Sentimiento de la Comunidad:</span>
                                   <div className="ratio-bar">
@@ -443,59 +757,56 @@ function App() {
                             </>
                           ) : (
                             <div className="empty-comments-state">
-                              Selecciona un hilo de debate a la izquierda para ver los comentarios de los vecinos.
+                              Selecciona un hilo de debate a la izquierda para ver los comentarios.
                             </div>
                           )}
                         </div>
                       </div>
                     ) : (
                       <div className="empty-debates-card">
-                        No se registran foros locales ni discusiones de comentarios procesadas para esta figura. Haz clic en "Actualizar Perfil" para intentar recopilar discusiones ciudadanas.
+                        No se registran foros ni discusiones procesadas para esta figura.
                       </div>
                     )}
                   </div>
 
                   <div className="mentions-audit" style={{ animation: 'slideIn 1.1s ease-out', marginTop: '2.5rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                        <h3 style={{fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'}}>
-                            <Activity size={18} color="var(--primary-accent)" /> Auditoría de Voz Popular (Random Insights)
-                        </h3>
-                        <button 
-                            className="filter-btn" 
-                            style={{ fontSize: '0.75rem', padding: '0.4rem 1rem' }}
-                            onClick={() => fetchMencionesRandom(selectedPolitico.id)}
-                            disabled={loadingMenciones}
-                        >
-                            <RefreshCw size={12} className={loadingMenciones ? 'spin' : ''} style={{marginRight: '6px'}} />
-                            Rotar Muestra
-                        </button>
+                      <h3 style={{fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'}}>
+                        <Activity size={18} color="var(--primary-accent)" /> Auditoría de Voz Popular (Random Insights)
+                      </h3>
+                      <button 
+                        className="filter-btn" 
+                        style={{ fontSize: '0.75rem', padding: '0.4rem 1rem' }}
+                        onClick={() => fetchMencionesRandom(selectedPolitico.id)}
+                        disabled={loadingMenciones}
+                      >
+                        <RefreshCw size={12} className={loadingMenciones ? 'spin' : ''} style={{marginRight: '6px'}} />
+                        Rotar Muestra
+                      </button>
                     </div>
                     
                     <div className="mentions-grid">
-                        {mencionesRandom.length > 0 ? (
-                            mencionesRandom.map((m, idx) => (
-                                <div key={m.id || idx} className="mention-card" style={{ animationDelay: `${idx * 0.1}s` }}>
-                                    <div className="mention-meta">
-                                        <span className={`sentimiento-tag ${m.sentimiento}`}>{m.sentimiento}</span>
-                                        <span className="source-tag">{m.fuente}</span>
-                                    </div>
-                                    <p className="mention-text">"{m.texto.length > 180 ? m.texto.substring(0, 180) + '...' : m.texto}"</p>
-                                </div>
-                            ))
-                        ) : (
-                            <p style={{color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', gridColumn: '1/-1', padding: '2rem'}}>
-                                No hay fragmentos de texto procesados recientemente para este perfil.
-                            </p>
-                        )}
+                      {mencionesRandom.length > 0 ? (
+                        mencionesRandom.map((m, idx) => (
+                          <div key={m.id || idx} className="mention-card" style={{ animationDelay: `${idx * 0.1}s` }}>
+                            <div className="mention-meta">
+                              <span className={`sentimiento-tag ${m.sentimiento}`}>{m.sentimiento}</span>
+                              <span className="source-tag">{m.fuente}</span>
+                            </div>
+                            <p className="mention-text">"{m.texto.length > 180 ? m.texto.substring(0, 180) + '...' : m.texto}"</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p style={{color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', gridColumn: '1/-1', padding: '2rem'}}>
+                          No hay fragmentos de texto procesados recientemente para este perfil.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </>
               ) : (
                 <div className="empty-state">
-                  <p>Iniciando auditoría de datos para este perfil...</p>
-                  <button className="btn-primary" onClick={handleSimular} disabled={simulating}>
-                    {simulating ? 'Analizando...' : 'Comenzar Análisis IA'}
-                  </button>
+                  <p>Cargando métricas del perfil...</p>
                 </div>
               )}
             </div>
@@ -506,19 +817,340 @@ function App() {
                 Monitor de Sentimiento en Tiempo Real
               </div>
               <p style={{color: 'var(--text-muted)', fontSize: '0.9rem'}}>
-                Selecciona una figura política del directorio para iniciar el análisis profundo de medios locales y redes sociales.
+                Selecciona una figura política del directorio para iniciar el análisis profundo.
               </p>
             </div>
           )}
         </div>
       </div>
-      {showSwapModal && (
 
+      {/* BOTÓN FLOTANTE DE ACCESO RÁPIDO A SOLICITUDES Y CHAT */}
+      <button
+        type="button"
+        className="floating-chat-btn"
+        onClick={() => {
+          fetchSolicitudes();
+          fetchChat();
+          setShowDrawer(true);
+        }}
+      >
+        <MessageSquare size={20} />
+        <span>Solicitudes & Chat</span>
+        {pendientesCount > 0 && (
+          <span className="floating-badge">{pendientesCount}</span>
+        )}
+      </button>
+
+      {/* PANEL LATERAL (DRAWER): SOLICITUDES DE DIRECTORIO & CHAT INTERNO */}
+      {showDrawer && (
+        <div className="drawer-overlay" onClick={() => setShowDrawer(false)}>
+          <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-header">
+              <div>
+                <h3>Solicitudes de Directorio & Chat</h3>
+                <p>Canal colaborativo entre Visualizadores y Administración</p>
+              </div>
+              <button type="button" className="icon-close-btn" onClick={() => setShowDrawer(false)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="drawer-tabs">
+              <button
+                type="button"
+                className={`drawer-tab-btn ${drawerTab === 'solicitudes' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('solicitudes')}
+              >
+                📋 Solicitudes de Cambio ({pendientesCount} pend.)
+              </button>
+              <button
+                type="button"
+                className={`drawer-tab-btn ${drawerTab === 'chat' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('chat')}
+              >
+                💬 Chat Interno ({mensajesChat.length})
+              </button>
+            </div>
+
+            {drawerTab === 'solicitudes' ? (
+              <div className="drawer-body">
+                <form className="request-form-card" onSubmit={handleCrearSolicitud}>
+                  <h4>Proponer Cambio de Figura en Panel ({ambito === 'tdf' ? 'Tierra del Fuego' : 'Nacional'})</h4>
+                  <div className="form-group compact">
+                    <label>Figura Actual a Reemplazar</label>
+                    <select
+                      value={solOldPoliticoId}
+                      onChange={(e) => setSolOldPoliticoId(e.target.value)}
+                      required
+                    >
+                      {politicos.map(p => (
+                        <option key={p.id} value={p.id}>{p.nombre} ({p.cargo})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-row-2">
+                    <div className="form-group compact">
+                      <label>Nueva Persona a Evaluar</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Juan Pérez"
+                        value={solNewNombre}
+                        onChange={(e) => setSolNewNombre(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group compact">
+                      <label>Cargo / Alianza</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Candidato Senador / Intendente"
+                        value={solNewCargo}
+                        onChange={(e) => setSolNewCargo(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="form-group compact">
+                    <label>Motivo de la Solicitud</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Ej. Solicito agregar a esta figura en reemplazo del referente actual para medir su impacto electoral..."
+                      value={solMotivo}
+                      onChange={(e) => setSolMotivo(e.target.value)}
+                      required
+                    />
+                  </div>
+                  {solFeedback && <div className="request-feedback">{solFeedback}</div>}
+                  <button type="submit" className="btn-primary full-width" disabled={enviandoSolicitud}>
+                    <Send size={15} />
+                    {enviandoSolicitud ? 'Enviando solicitud...' : 'Enviar Solicitud al Panel'}
+                  </button>
+                </form>
+
+                <div className="requests-list-section">
+                  <h4>Historial de Solicitudes</h4>
+                  {solicitudes.length === 0 ? (
+                    <div className="empty-requests">No hay solicitudes registradas todavía.</div>
+                  ) : (
+                    solicitudes.map(sol => (
+                      <div key={sol.id} className={`request-item-card ${sol.estado}`}>
+                        <div className="request-item-header">
+                          <span className="request-author">
+                            👤 {sol.autor_nombre} <small>({sol.autor_rol})</small>
+                          </span>
+                          <span className={`request-status-badge ${sol.estado}`}>
+                            {sol.estado.toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="request-swap-summary">
+                          <span>Sale: <strong>{sol.old_politico_nombre}</strong></span>
+                          <span>→</span>
+                          <span>Entra: <strong style={{color: 'var(--primary-accent)'}}>{sol.new_politico_nombre}</strong> ({sol.new_politico_cargo})</span>
+                        </div>
+                        <p className="request-motivo">"{sol.motivo}"</p>
+                        <div className="request-meta-footer">
+                          <span>Ámbito: {sol.ambito === 'nacional' ? '🇦🇷 Nacional' : '🏔️ TDF'}</span>
+                          <span>{sol.fecha_creacion}</span>
+                        </div>
+
+                        {sol.nota_admin && (
+                          <div className="admin-resolution-note">
+                            <strong>Nota Admin:</strong> {sol.nota_admin}
+                          </div>
+                        )}
+
+                        {isAdmin && sol.estado === 'pendiente' && (
+                          <div className="admin-approval-box">
+                            <input
+                              type="text"
+                              placeholder="Nota opcional de aprobación o rechazo..."
+                              value={notasAdmin[sol.id] || ''}
+                              onChange={(e) => setNotasAdmin({ ...notasAdmin, [sol.id]: e.target.value })}
+                            />
+                            <div className="admin-approval-buttons">
+                              <button
+                                type="button"
+                                className="btn-approve"
+                                disabled={resolviendoId === sol.id}
+                                onClick={() => handleResolverSolicitud(sol.id, 'aprobar')}
+                              >
+                                <CheckCircle2 size={15} />
+                                {resolviendoId === sol.id ? 'Ejecutando...' : 'Aprobar y Ejecutar Swap'}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-reject"
+                                disabled={resolviendoId === sol.id}
+                                onClick={() => handleResolverSolicitud(sol.id, 'rechazar')}
+                              >
+                                <XCircle size={15} />
+                                Rechazar
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="drawer-body chat-mode">
+                <div className="internal-chat-messages">
+                  {mensajesChat.map(msg => (
+                    <div key={msg.id} className={`chat-bubble ${msg.autor_rol === 'admin' ? 'admin-msg' : 'viewer-msg'}`}>
+                      <div className="chat-bubble-header">
+                        <strong>{msg.autor_nombre}</strong>
+                        <span className={`role-mini-tag ${msg.autor_rol}`}>
+                          {msg.autor_rol === 'admin' ? 'Admin' : 'Visualizador'}
+                        </span>
+                        <span className="chat-time">{msg.fecha_hora}</span>
+                      </div>
+                      <p>{msg.texto}</p>
+                    </div>
+                  ))}
+                </div>
+                <form className="chat-input-bar" onSubmit={handleEnviarMensajeChat}>
+                  <input
+                    type="text"
+                    placeholder={`Escribir en el chat como ${currentUser.nombre_mostrar}...`}
+                    value={nuevoMensajeChat}
+                    onChange={(e) => setNuevoMensajeChat(e.target.value)}
+                  />
+                  <button type="submit" className="btn-send-chat">
+                    <Send size={16} />
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE PERFIL / AUTENTICACIÓN (ADMIN vs VISUALIZADOR) */}
+      {showAuthModal && (
+        <div className="modal-overlay" onClick={() => setShowAuthModal(false)}>
+          <div className="modal-content" style={{ maxHeight: '90vh', overflowY: 'auto', width: '540px' }} onClick={(e) => e.stopPropagation()}>
+            <h3>Perfiles y Credenciales del Equipo</h3>
+            <p>
+              Cambia rápidamente de perfil o ingresa con usuario y contraseña. Si eres <strong>Administrador</strong>, puedes crear credenciales nuevas para tus compañeros de trabajo.
+            </p>
+
+            <div className="quick-profiles-grid">
+              {(usuariosList.length > 0 ? usuariosList : [
+                { username: 'equipo', nombre_mostrar: 'Analista Equipo TDF', rol: 'visualizador' },
+                { username: 'invitado', nombre_mostrar: 'Compañero Visualizador', rol: 'visualizador' },
+                { username: 'admin', nombre_mostrar: 'Administrador General', rol: 'admin' }
+              ]).map((u) => (
+                <button
+                  key={u.username}
+                  type="button"
+                  className={`profile-option-card ${currentUser.username === u.username ? 'selected' : ''}`}
+                  onClick={() => {
+                    if (u.rol === 'admin') {
+                      setLoginUsername(u.username);
+                      setLoginPassword('admin2026');
+                    } else {
+                      setCurrentUser({ username: u.username, nombre_mostrar: u.nombre_mostrar, rol: u.rol });
+                      setShowAuthModal(false);
+                    }
+                  }}
+                >
+                  {u.rol === 'admin' ? <Unlock size={20} color="#34d399" /> : <UserCheck size={20} color="#38bdf8" />}
+                  <div>
+                    <strong>{u.nombre_mostrar} <small style={{ opacity: 0.7 }}>({u.username})</small></strong>
+                    <span>
+                      {u.rol === 'admin'
+                        ? 'Rol: Administrador (Control total, scraping y aprobación de cambios)'
+                        : 'Rol: Visualizador (Explora TDF/Nacional y envía solicitudes por chat)'}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {isAdmin && (
+              <form onSubmit={handleCrearUsuario} style={{ marginTop: '1.25rem', background: 'rgba(52, 211, 153, 0.06)', border: '1px solid rgba(52, 211, 153, 0.25)', borderRadius: '14px', padding: '1rem' }}>
+                <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: 'var(--primary-accent)' }}>
+                  ➕ Crear Credencial de Visualizador para Compañero
+                </h4>
+                <div className="form-group compact">
+                  <label>Nombre y Apellido del Compañero</label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Laura Gómez"
+                    value={nuevoUserNombre}
+                    onChange={(e) => setNuevoUserNombre(e.target.value)}
+                  />
+                </div>
+                <div className="form-row-2">
+                  <div className="form-group compact">
+                    <label>Usuario de Acceso</label>
+                    <input
+                      type="text"
+                      placeholder="Ej. lgomez"
+                      value={nuevoUserLogin}
+                      onChange={(e) => setNuevoUserLogin(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group compact">
+                    <label>Contraseña Asignada</label>
+                    <input
+                      type="text"
+                      placeholder="Ej. equipo2026"
+                      value={nuevoUserPass}
+                      onChange={(e) => setNuevoUserPass(e.target.value)}
+                    />
+                  </div>
+                </div>
+                {userCreateMsg && <div className="request-feedback" style={{ marginBottom: '0.6rem' }}>{userCreateMsg}</div>}
+                <button type="submit" className="btn-primary full-width" style={{ padding: '0.6rem 1rem', fontSize: '0.8rem' }}>
+                  Guardar Nueva Credencial
+                </button>
+              </form>
+            )}
+
+            <form onSubmit={handleLoginSubmit} style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.1rem' }}>
+              {loginError && <div className="error-message">{loginError}</div>}
+              <div className="form-row-2">
+                <div className="form-group compact">
+                  <label>Ingresar con Usuario</label>
+                  <input
+                    type="text"
+                    value={loginUsername}
+                    onChange={(e) => setLoginUsername(e.target.value)}
+                  />
+                </div>
+                <div className="form-group compact">
+                  <label>Contraseña (Admin: admin2026)</label>
+                  <input
+                    type="password"
+                    placeholder="Contraseña..."
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="modal-actions" style={{ marginTop: '0.8rem' }}>
+                <button type="button" className="btn-secondary" onClick={() => setShowAuthModal(false)}>
+                  Cerrar
+                </button>
+                <button type="submit" className="btn-primary">
+                  Iniciar Sesión
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE REEMPLAZO DIRECTO (SOLO ADMIN) */}
+      {showSwapModal && isAdmin && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3>Intercambiar Referente</h3>
+            <h3>Intercambiar Referente ({ambito === 'tdf' ? 'TDF' : 'Nacional'})</h3>
             <p>
-              Reemplaza a <strong>{selectedPolitico?.nombre}</strong> en el directorio. Se mantendrá el cupo total y se recalcularán los datos del nuevo integrante.
+              Reemplaza directamente a <strong>{selectedPolitico?.nombre}</strong> en el directorio. Se mantendrá el cupo del panel y se calcularán los indicadores de la nueva figura.
             </p>
             {swapError && <div className="error-message">{swapError}</div>}
             <form onSubmit={handleSwap}>
@@ -534,10 +1166,10 @@ function App() {
                 />
               </div>
               <div className="form-group">
-                <label>Cargo / Función en TDF</label>
+                <label>Cargo / Alianza</label>
                 <input
                   type="text"
-                  placeholder="Ej. Referente Tolhuin / Concejal"
+                  placeholder="Ej. Referente / Legislador / Candidato"
                   value={newCargo}
                   onChange={(e) => setNewCargo(e.target.value)}
                   disabled={swapping}
@@ -568,6 +1200,5 @@ function App() {
     </div>
   );
 }
-
 
 export default App;

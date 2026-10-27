@@ -1,15 +1,12 @@
-version: "3.8"
-
 services:
   db:
-    image: postgres:15-alpine
+    build: ./db_init
     container_name: tdf_politicos_db
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: password
       POSTGRES_DB: politicostdf
     volumes:
-      - ./db_init:/docker-entrypoint-initdb.d
       - db_data:/var/lib/postgresql/data
     ports:
       - "5435:5432"
@@ -43,6 +40,13 @@ services:
       - api
     environment:
       - VITE_API_URL=http://localhost:8010
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: tdf_politicos_tunnel
+    command: tunnel --no-autoupdate --url http://web:6969
+    depends_on:
+      - web
 
 volumes:
   db_data:
