@@ -28,16 +28,25 @@ function App() {
   const [ambito, setAmbito] = useState('tdf');
   const [busqueda, setBusqueda] = useState('');
 
-  // Autenticación / Perfiles (Por defecto inicia como Administrador o guardado en localStorage)
+  // Autenticación / Perfiles (Por defecto SIEMPRE inicia como Visualizador al compartir el link)
   const [currentUser, setCurrentUser] = useState(() => {
-    const saved = localStorage.getItem('tdf_user_profile');
+    localStorage.removeItem('tdf_user_profile'); // Limpiar sesión previa que abría como admin por defecto
+    const saved = localStorage.getItem('tdf_user_session_v2');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.rol === 'admin' && parsed.authenticated === true) {
+          return parsed;
+        }
+        if (parsed && parsed.rol === 'visualizador') {
+          return parsed;
+        }
+      } catch (e) {}
     }
     return {
-      username: 'admin',
-      nombre_mostrar: 'Administrador General',
-      rol: 'admin'
+      username: 'invitado',
+      nombre_mostrar: 'Compañero Visualizador',
+      rol: 'visualizador'
     };
   });
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -90,7 +99,7 @@ function App() {
   const isAdmin = currentUser?.rol === 'admin';
 
   useEffect(() => {
-    localStorage.setItem('tdf_user_profile', JSON.stringify(currentUser));
+    localStorage.setItem('tdf_user_session_v2', JSON.stringify(currentUser));
   }, [currentUser]);
 
   useEffect(() => {
@@ -375,23 +384,27 @@ function App() {
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setLoginError('');
+    if (!loginPassword.trim()) {
+      setLoginError('Por favor ingresa la contraseña de acceso.');
+      return;
+    }
     try {
       const response = await axios.post(`${API_URL}/auth/login`, {
         username: loginUsername,
         password: loginPassword
       });
       if (!response.data || !response.data.username) throw new Error("Fallback login");
-      setCurrentUser(response.data);
+      setCurrentUser({ ...response.data, authenticated: true });
       setShowAuthModal(false);
       setLoginPassword('');
     } catch (error) {
       const list = usuariosList.length ? usuariosList : INITIAL_USUARIOS;
       const found = list.find(u => u.username === loginUsername.trim().toLowerCase());
-      if (!found || (found.password && loginPassword && found.password !== loginPassword)) {
-        setLoginError('Credenciales inválidas');
+      if (!found || !loginPassword || found.password !== loginPassword) {
+        setLoginError('Usuario o contraseña incorrectos.');
         return;
       }
-      setCurrentUser(found);
+      setCurrentUser({ ...found, authenticated: true });
       setShowAuthModal(false);
       setLoginPassword('');
     }
@@ -665,12 +678,43 @@ function App() {
             />
           </div>
 
+          <div className="mobile-quick-select-wrapper">
+            <label htmlFor="mobile-pol-select">Selección rápida en celular:</label>
+            <select
+              id="mobile-pol-select"
+              className="mobile-politico-select"
+              value={selectedPolitico?.id || ''}
+              onChange={(e) => {
+                const found = politicos.find(p => p.id === e.target.value);
+                if (found) {
+                  setSelectedPolitico(found);
+                  setTimeout(() => {
+                    document.getElementById('detalle-politico')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }, 80);
+                }
+              }}
+            >
+              {politicosFiltrados.map(pol => (
+                <option key={pol.id} value={pol.id}>
+                  {pol.nombre} — {pol.cargo}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="politicos-list">
             {politicosFiltrados.map((pol, idx) => (
               <div 
                 key={pol.id} 
                 className={`politico-item ${selectedPolitico?.id === pol.id ? 'selected' : ''}`}
-                onClick={() => setSelectedPolitico(pol)}
+                onClick={() => {
+                  setSelectedPolitico(pol);
+                  if (typeof window !== 'undefined' && window.innerWidth <= 980) {
+                    setTimeout(() => {
+                      document.getElementById('detalle-politico')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 80);
+                  }
+                }}
                 style={{ animationDelay: `${idx * 0.03}s` }}
               >
                 <div className="politico-info">
@@ -682,7 +726,7 @@ function App() {
           </div>
         </div>
 
-        <div className="card detail-card">
+        <div id="detalle-politico" className="card detail-card">
           {selectedPolitico ? (
             <div className="detail-view">
               <div className="detail-header" style={{ animation: 'slideIn 0.5s ease-out' }}>
@@ -1170,16 +1214,16 @@ function App() {
       {/* MODAL DE PERFIL / AUTENTICACIÓN (ADMIN vs VISUALIZADOR) */}
       {showAuthModal && (
         <div className="modal-overlay" onClick={() => setShowAuthModal(false)}>
-          <div className="modal-content" style={{ maxHeight: '90vh', overflowY: 'auto', width: '540px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content auth-modal-content" onClick={(e) => e.stopPropagation()}>
             <h3>Perfiles y Credenciales del Equipo</h3>
             <p>
-              Cambia rápidamente de perfil o ingresa con usuario y contraseña. Si eres <strong>Administrador</strong>, puedes crear credenciales nuevas para tus compañeros de trabajo.
+              Por seguridad, el enlace compartido abre siempre en modo <strong>Visualizador</strong>. Para habilitar las funciones de <strong>Administrador</strong>, ingresa con tu usuario y contraseña.
             </p>
 
             <div className="quick-profiles-grid">
               {(usuariosList.length > 0 ? usuariosList : [
-                { username: 'equipo', nombre_mostrar: 'Analista Equipo TDF', rol: 'visualizador' },
                 { username: 'invitado', nombre_mostrar: 'Compañero Visualizador', rol: 'visualizador' },
+                { username: 'equipo', nombre_mostrar: 'Analista Equipo TDF', rol: 'visualizador' },
                 { username: 'admin', nombre_mostrar: 'Administrador General', rol: 'admin' }
               ]).map((u) => (
                 <button
@@ -1189,19 +1233,21 @@ function App() {
                   onClick={() => {
                     if (u.rol === 'admin') {
                       setLoginUsername(u.username);
-                      setLoginPassword('admin2026');
+                      setLoginPassword('');
+                      setLoginError('🔒 Ingresa tu contraseña de Administrador abajo para desbloquear el modo edición.');
                     } else {
-                      setCurrentUser({ username: u.username, nombre_mostrar: u.nombre_mostrar, rol: u.rol });
+                      setLoginError('');
+                      setCurrentUser({ username: u.username, nombre_mostrar: u.nombre_mostrar, rol: 'visualizador' });
                       setShowAuthModal(false);
                     }
                   }}
                 >
-                  {u.rol === 'admin' ? <Unlock size={20} color="#34d399" /> : <UserCheck size={20} color="#38bdf8" />}
+                  {u.rol === 'admin' ? <Lock size={20} color="#34d399" /> : <UserCheck size={20} color="#38bdf8" />}
                   <div>
                     <strong>{u.nombre_mostrar} <small style={{ opacity: 0.7 }}>({u.username})</small></strong>
                     <span>
                       {u.rol === 'admin'
-                        ? 'Rol: Administrador (Control total, scraping y aprobación de cambios)'
+                        ? 'Rol: Administrador (Requiere contraseña — Control total y aprobación de cambios)'
                         : 'Rol: Visualizador (Explora TDF/Nacional y envía solicitudes por chat)'}
                     </span>
                   </div>
@@ -1262,10 +1308,10 @@ function App() {
                   />
                 </div>
                 <div className="form-group compact">
-                  <label>Contraseña (Admin: admin2026)</label>
+                  <label>Contraseña de Acceso</label>
                   <input
                     type="password"
-                    placeholder="Contraseña..."
+                    placeholder="Ingresa tu contraseña..."
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                   />

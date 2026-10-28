@@ -364,7 +364,7 @@ def login_usuario(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(Usuario).filter(Usuario.username == req.username.strip().lower()).first()
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
-    if req.password is not None and req.password != "" and user.password != req.password:
+    if not req.password or user.password != req.password:
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
     return {
         "id": user.id,
