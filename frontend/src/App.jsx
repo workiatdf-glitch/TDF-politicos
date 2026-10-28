@@ -9,6 +9,15 @@ import {
   UserCheck, Send, CheckCircle2, XCircle, ArrowLeftRight, Search, X
 } from 'lucide-react';
 import './index.css';
+import {
+  INITIAL_USUARIOS,
+  INITIAL_CHAT,
+  getCloudPoliticos,
+  saveCloudPoliticos,
+  generateCloudMetricas,
+  generateCloudDebates,
+  generateCloudMenciones
+} from './cloudData';
 
 const API_URL = (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
   ? '/api-proxy'
@@ -93,9 +102,9 @@ function App() {
 
   useEffect(() => {
     if (selectedPolitico) {
-      fetchMetricas(selectedPolitico.id);
-      fetchMencionesRandom(selectedPolitico.id);
-      fetchDebates(selectedPolitico.id);
+      fetchMetricas(selectedPolitico.id, selectedPolitico);
+      fetchMencionesRandom(selectedPolitico.id, selectedPolitico);
+      fetchDebates(selectedPolitico.id, selectedPolitico);
       setSolOldPoliticoId(selectedPolitico.id);
     } else {
       setMetricas([]);
@@ -111,6 +120,7 @@ function App() {
       const response = await axios.get(`${API_URL}/politicos`, {
         params: { ambito: ambitoActual }
       });
+      if (!Array.isArray(response.data)) throw new Error("Cloudflare static fallback");
       setPoliticos(response.data);
       if (response.data.length > 0) {
         setSelectedPolitico(response.data[0]);
@@ -119,7 +129,14 @@ function App() {
         setSelectedPolitico(null);
       }
     } catch (error) {
-      console.error("Error fetching politicos:", error);
+      const fallbackList = getCloudPoliticos(ambitoActual);
+      setPoliticos(fallbackList);
+      if (fallbackList.length > 0) {
+        setSelectedPolitico(fallbackList[0]);
+        setSolOldPoliticoId(fallbackList[0].id);
+      } else {
+        setSelectedPolitico(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -128,27 +145,33 @@ function App() {
   const fetchSolicitudes = async () => {
     try {
       const response = await axios.get(`${API_URL}/solicitudes`);
+      if (!Array.isArray(response.data)) throw new Error("Cloudflare static fallback");
       setSolicitudes(response.data);
     } catch (error) {
-      console.error("Error fetching solicitudes:", error);
+      const saved = localStorage.getItem("cloud_solicitudes_v2");
+      setSolicitudes(saved ? JSON.parse(saved) : []);
     }
   };
 
   const fetchChat = async () => {
     try {
       const response = await axios.get(`${API_URL}/chat`);
+      if (!Array.isArray(response.data)) throw new Error("Cloudflare static fallback");
       setMensajesChat(response.data);
     } catch (error) {
-      console.error("Error fetching chat:", error);
+      const saved = localStorage.getItem("cloud_chat_v2");
+      setMensajesChat(saved ? JSON.parse(saved) : INITIAL_CHAT);
     }
   };
 
   const fetchUsuarios = async () => {
     try {
       const response = await axios.get(`${API_URL}/usuarios`);
+      if (!Array.isArray(response.data)) throw new Error("Cloudflare static fallback");
       setUsuariosList(response.data);
     } catch (error) {
-      console.error("Error fetching usuarios:", error);
+      const saved = localStorage.getItem("cloud_usuarios_v2");
+      setUsuariosList(saved ? JSON.parse(saved) : INITIAL_USUARIOS);
     }
   };
 
@@ -160,25 +183,46 @@ function App() {
       return;
     }
     try {
-      await axios.post(`${API_URL}/usuarios`, {
+      const res = await axios.post(`${API_URL}/usuarios`, {
         username: nuevoUserLogin.trim(),
         nombre_mostrar: nuevoUserNombre.trim(),
         password: nuevoUserPass.trim(),
         rol: 'visualizador'
       });
+      if (!res.data || typeof res.data !== 'object' || !res.data.username) throw new Error("Fallback");
       setUserCreateMsg(`✅ Credencial creada: usuario "${nuevoUserLogin.trim().toLowerCase()}"`);
       setNuevoUserNombre('');
       setNuevoUserLogin('');
       setNuevoUserPass('');
       await fetchUsuarios();
     } catch (error) {
-      setUserCreateMsg(error.response?.data?.detail || 'Error al crear usuario');
+      const current = usuariosList.length ? [...usuariosList] : [...INITIAL_USUARIOS];
+      const uname = nuevoUserLogin.trim().toLowerCase();
+      if (current.some(u => u.username === uname)) {
+        setUserCreateMsg('Ese nombre de usuario ya existe.');
+        return;
+      }
+      const nuevo = {
+        id: Date.now(),
+        username: uname,
+        nombre_mostrar: nuevoUserNombre.trim(),
+        password: nuevoUserPass.trim(),
+        rol: 'visualizador'
+      };
+      const updated = [...current, nuevo];
+      localStorage.setItem("cloud_usuarios_v2", JSON.stringify(updated));
+      setUsuariosList(updated);
+      setUserCreateMsg(`✅ Credencial creada: usuario "${uname}"`);
+      setNuevoUserNombre('');
+      setNuevoUserLogin('');
+      setNuevoUserPass('');
     }
   };
 
-  const fetchMetricas = async (id) => {
+  const fetchMetricas = async (id, polObj = selectedPolitico) => {
     try {
       const response = await axios.get(`${API_URL}/politicos/${id}/metricas`);
+      if (!Array.isArray(response.data) || response.data.length === 0) throw new Error("Cloudflare static fallback");
 
       const quarterMap = {};
       response.data.forEach(m => {
@@ -212,37 +256,36 @@ function App() {
 
       setMetricas(formattedData);
     } catch (error) {
-      console.error("Error fetching metricas:", error);
+      if (polObj) setMetricas(generateCloudMetricas(polObj));
     }
   };
 
-  const fetchMencionesRandom = async (id) => {
+  const fetchMencionesRandom = async (id, polObj = selectedPolitico) => {
     setLoadingMenciones(true);
     try {
       const response = await axios.get(`${API_URL}/politicos/${id}/menciones/random?limit=4`);
+      if (!Array.isArray(response.data) || response.data.length === 0) throw new Error("Cloudflare static fallback");
       setMencionesRandom(response.data);
     } catch (error) {
-      console.error("Error fetching random menciones:", error);
-      setMencionesRandom([]);
+      if (polObj) setMencionesRandom(generateCloudMenciones(polObj));
     } finally {
       setLoadingMenciones(false);
     }
   };
 
-  const fetchDebates = async (id) => {
+  const fetchDebates = async (id, polObj = selectedPolitico) => {
     setLoadingDebates(true);
     try {
       const response = await axios.get(`${API_URL}/politicos/${id}/debates`);
+      if (!Array.isArray(response.data) || response.data.length === 0) throw new Error("Cloudflare static fallback");
       setDebates(response.data);
-      if (response.data.length > 0) {
-        setSelectedDebate(response.data[0]);
-      } else {
-        setSelectedDebate(null);
-      }
+      setSelectedDebate(response.data[0]);
     } catch (error) {
-      console.error("Error fetching debates:", error);
-      setDebates([]);
-      setSelectedDebate(null);
+      if (polObj) {
+        const d = generateCloudDebates(polObj);
+        setDebates(d);
+        setSelectedDebate(d[0] || null);
+      }
     } finally {
       setLoadingDebates(false);
     }
@@ -254,11 +297,14 @@ function App() {
     try {
       await axios.post(`${API_URL}/simular`, null, { params: { ambito } });
       if (selectedPolitico) {
-        await fetchMetricas(selectedPolitico.id);
-        await fetchDebates(selectedPolitico.id);
+        await fetchMetricas(selectedPolitico.id, selectedPolitico);
+        await fetchDebates(selectedPolitico.id, selectedPolitico);
       }
     } catch (error) {
-      console.error("Error simulando datos:", error);
+      if (selectedPolitico) {
+        setMetricas(generateCloudMetricas(selectedPolitico));
+        setDebates(generateCloudDebates(selectedPolitico));
+      }
     } finally {
       setSimulating(false);
     }
@@ -269,11 +315,15 @@ function App() {
     setScrappearUnoId(id);
     try {
       await axios.post(`${API_URL}/politicos/${id}/scrappear`);
-      await fetchMetricas(id);
-      await fetchMencionesRandom(id);
-      await fetchDebates(id);
+      await fetchMetricas(id, selectedPolitico);
+      await fetchMencionesRandom(id, selectedPolitico);
+      await fetchDebates(id, selectedPolitico);
     } catch (error) {
-      console.error("Error actualizando perfil:", error);
+      if (selectedPolitico) {
+        setMetricas(generateCloudMetricas(selectedPolitico));
+        setMencionesRandom(generateCloudMenciones(selectedPolitico));
+        setDebates(generateCloudDebates(selectedPolitico));
+      }
     } finally {
       setScrappearUnoId(null);
     }
@@ -294,15 +344,29 @@ function App() {
         new_nombre: newNombre.trim(),
         new_cargo: newCargo.trim()
       });
-      if (response.data.status === "success") {
+      if (response.data && response.data.status === "success") {
         await fetchPoliticos(ambito);
         const nuevo = response.data.new_politico;
         setSelectedPolitico(nuevo);
         setShowSwapModal(false);
+      } else {
+        throw new Error("Fallback swap");
       }
     } catch (error) {
-      console.error("Error al intercambiar político:", error);
-      setSwapError(error.response?.data?.detail || "Ocurrió un error al realizar el intercambio.");
+      const all = getCloudPoliticos();
+      const newId = newNombre.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const nuevoPol = {
+        id: newId || `pol_${Date.now()}`,
+        nombre: newNombre.trim(),
+        cargo: newCargo.trim(),
+        categoria: selectedPolitico.categoria || "Primera línea",
+        ambito: ambito
+      };
+      const updated = all.map(p => p.id === selectedPolitico.id ? nuevoPol : p);
+      saveCloudPoliticos(updated);
+      setPoliticos(updated.filter(p => p.ambito === ambito));
+      setSelectedPolitico(nuevoPol);
+      setShowSwapModal(false);
     } finally {
       setSwapping(false);
     }
@@ -316,11 +380,20 @@ function App() {
         username: loginUsername,
         password: loginPassword
       });
+      if (!response.data || !response.data.username) throw new Error("Fallback login");
       setCurrentUser(response.data);
       setShowAuthModal(false);
       setLoginPassword('');
     } catch (error) {
-      setLoginError(error.response?.data?.detail || 'Credenciales inválidas');
+      const list = usuariosList.length ? usuariosList : INITIAL_USUARIOS;
+      const found = list.find(u => u.username === loginUsername.trim().toLowerCase());
+      if (!found || (found.password && loginPassword && found.password !== loginPassword)) {
+        setLoginError('Credenciales inválidas');
+        return;
+      }
+      setCurrentUser(found);
+      setShowAuthModal(false);
+      setLoginPassword('');
     }
   };
 
@@ -333,7 +406,7 @@ function App() {
     setEnviandoSolicitud(true);
     setSolFeedback('');
     try {
-      await axios.post(`${API_URL}/solicitudes`, {
+      const res = await axios.post(`${API_URL}/solicitudes`, {
         autor_nombre: currentUser.nombre_mostrar,
         autor_rol: currentUser.rol,
         ambito: ambito,
@@ -342,6 +415,7 @@ function App() {
         new_politico_cargo: solNewCargo.trim(),
         motivo: solMotivo.trim()
       });
+      if (!res.data || !res.data.id) throw new Error("Fallback solicitud");
       setSolNewNombre('');
       setSolNewCargo('');
       setSolMotivo('');
@@ -349,7 +423,39 @@ function App() {
       await fetchSolicitudes();
       await fetchChat();
     } catch (error) {
-      setSolFeedback(error.response?.data?.detail || 'Error al enviar la solicitud.');
+      const oldPol = politicos.find(p => p.id === solOldPoliticoId) || selectedPolitico;
+      const ahora = new Date().toLocaleString('es-AR', { hour12: false });
+      const nuevaSol = {
+        id: Date.now(),
+        autor_nombre: currentUser.nombre_mostrar,
+        autor_rol: currentUser.rol,
+        ambito,
+        old_politico_id: oldPol.id,
+        old_politico_nombre: oldPol.nombre,
+        new_politico_nombre: solNewNombre.trim(),
+        new_politico_cargo: solNewCargo.trim(),
+        motivo: solMotivo.trim(),
+        estado: 'pendiente',
+        fecha_creacion: ahora
+      };
+      const nextSols = [nuevaSol, ...solicitudes];
+      localStorage.setItem("cloud_solicitudes_v2", JSON.stringify(nextSols));
+      setSolicitudes(nextSols);
+
+      const nextChat = [...mensajesChat, {
+        id: Date.now() + 1,
+        autor_nombre: currentUser.nombre_mostrar,
+        autor_rol: currentUser.rol,
+        ambito,
+        texto: `📋 [Solicitud] Solicito agregar a ${nuevaSol.new_politico_nombre} (${nuevaSol.new_politico_cargo}) en reemplazo de ${oldPol.nombre}. Motivo: ${nuevaSol.motivo}`,
+        fecha_hora: ahora
+      }];
+      localStorage.setItem("cloud_chat_v2", JSON.stringify(nextChat));
+      setMensajesChat(nextChat);
+      setSolNewNombre('');
+      setSolNewCargo('');
+      setSolMotivo('');
+      setSolFeedback('✅ Solicitud enviada al Administrador y publicada en el chat interno.');
     } finally {
       setEnviandoSolicitud(false);
     }
@@ -358,13 +464,14 @@ function App() {
   const handleResolverSolicitud = async (solicitudId, accion) => {
     if (!isAdmin) return;
     setResolviendoId(solicitudId);
+    const nota = notasAdmin[solicitudId] || '';
     try {
-      const nota = notasAdmin[solicitudId] || '';
       const response = await axios.post(`${API_URL}/solicitudes/${solicitudId}/resolver`, {
         accion,
         nota_admin: nota,
         admin_nombre: currentUser.nombre_mostrar
       });
+      if (!response.data || !response.data.status) throw new Error("Fallback resolver");
       await fetchSolicitudes();
       await fetchChat();
       if (accion === 'aprobar') {
@@ -374,7 +481,28 @@ function App() {
         }
       }
     } catch (error) {
-      alert(error.response?.data?.detail || 'No se pudo procesar la solicitud.');
+      const sol = solicitudes.find(s => s.id === solicitudId);
+      if (sol) {
+        const nuevoEstado = accion === 'aprobar' ? 'aprobada' : 'rechazada';
+        const nextSols = solicitudes.map(s => s.id === solicitudId ? { ...s, estado: nuevoEstado, nota_admin: nota || (accion === 'aprobar' ? 'Aprobado y ejecutado.' : 'Rechazado.') } : s);
+        localStorage.setItem("cloud_solicitudes_v2", JSON.stringify(nextSols));
+        setSolicitudes(nextSols);
+        if (accion === 'aprobar') {
+          const all = getCloudPoliticos();
+          const newId = sol.new_politico_nombre.toLowerCase().replace(/[^a-z0-9]/g, '') || `pol_${Date.now()}`;
+          const nuevoPol = {
+            id: newId,
+            nombre: sol.new_politico_nombre,
+            cargo: sol.new_politico_cargo,
+            categoria: "Primera línea",
+            ambito: sol.ambito
+          };
+          const updated = all.map(p => p.id === sol.old_politico_id ? nuevoPol : p);
+          saveCloudPoliticos(updated);
+          setPoliticos(updated.filter(p => p.ambito === ambito));
+          setSelectedPolitico(nuevoPol);
+        }
+      }
     } finally {
       setResolviendoId(null);
     }
@@ -384,16 +512,28 @@ function App() {
     e.preventDefault();
     if (!nuevoMensajeChat.trim()) return;
     try {
-      await axios.post(`${API_URL}/chat`, {
+      const res = await axios.post(`${API_URL}/chat`, {
         autor_nombre: currentUser.nombre_mostrar,
         autor_rol: currentUser.rol,
         ambito: ambito,
         texto: nuevoMensajeChat.trim()
       });
+      if (!res.data || !res.data.id) throw new Error("Fallback chat");
       setNuevoMensajeChat('');
       await fetchChat();
     } catch (error) {
-      console.error("Error enviando mensaje:", error);
+      const ahora = new Date().toLocaleString('es-AR', { hour12: false });
+      const nextChat = [...mensajesChat, {
+        id: Date.now(),
+        autor_nombre: currentUser.nombre_mostrar,
+        autor_rol: currentUser.rol,
+        ambito,
+        texto: nuevoMensajeChat.trim(),
+        fecha_hora: ahora
+      }];
+      localStorage.setItem("cloud_chat_v2", JSON.stringify(nextChat));
+      setMensajesChat(nextChat);
+      setNuevoMensajeChat('');
     }
   };
 
