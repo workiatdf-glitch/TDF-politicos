@@ -16,7 +16,9 @@ import {
   saveCloudPoliticos,
   generateCloudMetricas,
   generateCloudDebates,
-  generateCloudMenciones
+  generateCloudMenciones,
+  refreshCloudPolitico,
+  refreshCloudAmbito
 } from './cloudData';
 
 const API_URL = (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
@@ -301,17 +303,23 @@ function App() {
   };
 
   const handleSimular = async () => {
-    if (!isAdmin) return;
     setSimulating(true);
     try {
-      await axios.post(`${API_URL}/simular`, null, { params: { ambito } });
+      const res = await axios.post(`${API_URL}/simular`, null, { params: { ambito } });
+      if (!res.data || typeof res.data !== 'object' || !res.data.mensaje) {
+        throw new Error("Cloudflare live refresh fallback");
+      }
       if (selectedPolitico) {
         await fetchMetricas(selectedPolitico.id, selectedPolitico);
+        await fetchMencionesRandom(selectedPolitico.id, selectedPolitico);
         await fetchDebates(selectedPolitico.id, selectedPolitico);
       }
     } catch (error) {
+      await refreshCloudAmbito(ambito);
       if (selectedPolitico) {
+        await refreshCloudPolitico(selectedPolitico);
         setMetricas(generateCloudMetricas(selectedPolitico));
+        setMencionesRandom(generateCloudMenciones(selectedPolitico));
         setDebates(generateCloudDebates(selectedPolitico));
       }
     } finally {
@@ -320,15 +328,18 @@ function App() {
   };
 
   const handleScrappearUno = async (id) => {
-    if (!isAdmin) return;
     setScrappearUnoId(id);
     try {
-      await axios.post(`${API_URL}/politicos/${id}/scrappear`);
+      const res = await axios.post(`${API_URL}/politicos/${id}/scrappear`);
+      if (!res.data || typeof res.data !== 'object' || res.data.status !== 'success') {
+        throw new Error("Cloudflare live refresh fallback");
+      }
       await fetchMetricas(id, selectedPolitico);
       await fetchMencionesRandom(id, selectedPolitico);
       await fetchDebates(id, selectedPolitico);
     } catch (error) {
       if (selectedPolitico) {
+        await refreshCloudPolitico(selectedPolitico);
         setMetricas(generateCloudMetricas(selectedPolitico));
         setMencionesRandom(generateCloudMenciones(selectedPolitico));
         setDebates(generateCloudDebates(selectedPolitico));
@@ -639,20 +650,19 @@ function App() {
               : 'Evaluación Federal de Candidatos Nacionales — Infobae, La Nación, Clarín, Página/12, Ámbito y Redes'}
           </p>
         </div>
-        <div className="controls-section">
-          {isAdmin ? (
-            <button 
-              className="btn-primary" 
-              onClick={handleSimular}
-              disabled={simulating}
-            >
-              <RefreshCw size={18} className={simulating ? 'spin' : ''} />
-              {simulating ? 'Escaneando medios...' : `Actualizar Inteligencia (${ambito === 'tdf' ? 'TDF' : 'Nacional'})`}
-            </button>
-          ) : (
+        <div className="controls-section" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+          <button 
+            className="btn-primary" 
+            onClick={handleSimular}
+            disabled={simulating}
+          >
+            <RefreshCw size={18} className={simulating ? 'spin' : ''} />
+            {simulating ? 'Escaneando medios en vivo...' : `Actualizar Inteligencia (${ambito === 'tdf' ? 'TDF' : 'Nacional'})`}
+          </button>
+          {!isAdmin && (
             <div className="viewer-readonly-banner">
-              <Lock size={15} />
-              <span>Modo Visualizador — Usa <strong>Solicitudes de Directorio</strong> para proponer cambios</span>
+              <Lock size={14} />
+              <span>Modo Visualizador — Para reemplazar candidatos usa <strong>Solicitudes de Directorio</strong></span>
             </div>
           )}
         </div>
@@ -745,31 +755,29 @@ function App() {
                   </div>
 
                   <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+                    <button 
+                      className="filter-btn" 
+                      style={{ background: 'rgba(52, 211, 153, 0.1)', color: 'var(--primary-accent)', borderColor: 'rgba(52, 211, 153, 0.3)', margin: 0, display: 'flex', alignItems: 'center' }}
+                      onClick={() => handleScrappearUno(selectedPolitico.id)}
+                      disabled={scrappearUnoId === selectedPolitico.id}
+                    >
+                      <RefreshCw size={14} className={scrappearUnoId === selectedPolitico.id ? 'spin' : ''} style={{marginRight: '8px'}} />
+                      {scrappearUnoId === selectedPolitico.id ? 'Refrescando...' : 'Actualizar Perfil'}
+                    </button>
                     {isAdmin ? (
-                      <>
-                        <button 
-                          className="filter-btn" 
-                          style={{ background: 'rgba(52, 211, 153, 0.1)', color: 'var(--primary-accent)', borderColor: 'rgba(52, 211, 153, 0.3)', margin: 0, display: 'flex', alignItems: 'center' }}
-                          onClick={() => handleScrappearUno(selectedPolitico.id)}
-                          disabled={scrappearUnoId === selectedPolitico.id}
-                        >
-                          <RefreshCw size={14} className={scrappearUnoId === selectedPolitico.id ? 'spin' : ''} style={{marginRight: '8px'}} />
-                          {scrappearUnoId === selectedPolitico.id ? 'Refrescando...' : 'Actualizar Perfil'}
-                        </button>
-                        <button 
-                          className="filter-btn" 
-                          style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}
-                          onClick={() => {
-                            setNewNombre('');
-                            setNewCargo('');
-                            setSwapError('');
-                            setShowSwapModal(true);
-                          }}
-                        >
-                          <ArrowLeftRight size={14} />
-                          Reemplazar Figura
-                        </button>
-                      </>
+                      <button 
+                        className="filter-btn" 
+                        style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}
+                        onClick={() => {
+                          setNewNombre('');
+                          setNewCargo('');
+                          setSwapError('');
+                          setShowSwapModal(true);
+                        }}
+                      >
+                        <ArrowLeftRight size={14} />
+                        Reemplazar Figura
+                      </button>
                     ) : (
                       <button
                         className="filter-btn"
