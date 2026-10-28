@@ -308,7 +308,10 @@ const POS_WORDS = [
   'solucion', 'apoyo', 'bien', 'mejor', 'exito', 'logro', 'avance',
   'beneficio', 'aumento', 'refuerzo', 'entrega', 'creacion', 'positivo',
   'festejo', 'reconocimiento', 'destacado', 'fondos', 'desarrollo',
-  'inversion', 'estabilidad', 'superavit', 'recuperacion', 'liderazgo'
+  'inversion', 'estabilidad', 'superavit', 'recuperacion', 'liderazgo',
+  'impulsa', 'presento', 'gestion', 'proyecto', 'industria', 'empleo',
+  'defensa', 'produccion', 'dialogo', 'unidad', 'modernizacion', 'alivio',
+  'credito', 'vivienda', 'salud', 'educacion', 'soberania', 'fortalecer'
 ];
 
 const NEG_WORDS = [
@@ -316,7 +319,9 @@ const NEG_WORDS = [
   'desempleo', 'corrupcion', 'culpa', 'rechazo', 'mal', 'peor',
   'conflicto', 'tragedia', 'inseguridad', 'robo', 'delito', 'problema',
   'corte', 'violencia', 'fuego', 'quemaron', 'ajuste', 'negativo', 'deuda',
-  'recesion', 'pobreza', 'tension', 'polemica', 'veto'
+  'recesion', 'pobreza', 'tension', 'polemica', 'veto', 'caida', 'critica',
+  'fracaso', 'emergencia', 'deficit', 'tarifazo', 'despidos', 'bloqueo',
+  'cuestiono', 'alerta', 'procesado', 'imputado', 'sin dinero', 'recorte'
 ];
 
 export function analizarSentimientoCloud(texto = '') {
@@ -331,6 +336,25 @@ export function analizarSentimientoCloud(texto = '') {
   if (pos > neg) return 'pos';
   if (neg > pos) return 'neg';
   return 'neu';
+}
+
+function calcularDeltasMenciones(menciones = [], seed = 0, count = 1) {
+  let posCount = 0;
+  let negCount = 0;
+  (menciones || []).forEach(m => {
+    if (m?.sentimiento === 'pos') posCount += 1;
+    else if (m?.sentimiento === 'neg') negCount += 1;
+  });
+  if (posCount + negCount > 0) {
+    const net = posCount - negCount;
+    const dPos = Math.max(-5.6, Math.min(5.6, net * 1.1 + ((seed % 5) - 2) * 0.3));
+    const dNeg = Math.max(-5.6, Math.min(5.6, -net * 0.9 + (((seed >> 2) % 5) - 2) * 0.3));
+    return { deltaPos: +dPos.toFixed(1), deltaNeg: +dNeg.toFixed(1) };
+  }
+  const deltaSeed = hashSeed(`${seed}_${count}`);
+  const dPos = ((deltaSeed % 7) - 3) * 0.6;
+  const dNeg = (((deltaSeed >> 3) % 7) - 3) * 0.5;
+  return { deltaPos: +dPos.toFixed(1), deltaNeg: +dNeg.toFixed(1) };
 }
 
 function getCloudOverrides() {
@@ -349,6 +373,7 @@ function saveCloudOverrides(map) {
 }
 
 export async function refreshCloudPolitico(pol) {
+  await sbSyncOverridesFromCloud();
   const overrides = getCloudOverrides();
   const prev = overrides[pol.id] || { count: 0 };
   const nextCount = (prev.count || 0) + 1;
@@ -366,7 +391,7 @@ export async function refreshCloudPolitico(pol) {
     if (res.ok) {
       const data = await res.json();
       if (data && Array.isArray(data.items) && data.items.length > 0) {
-        liveMenciones = data.items.slice(0, 4).map((item, idx) => {
+        liveMenciones = data.items.slice(0, 6).map((item, idx) => {
           const cleanTitle = (item.title || '').replace(/<[^>]*>?/gm, '').trim();
           return {
             id: Date.now() + idx,
@@ -378,19 +403,19 @@ export async function refreshCloudPolitico(pol) {
       }
     }
   } catch (e) {
-    // Fallback heurístico en nube si el endpoint RSS público no responde
+    // Fallback manteniendo menciones reales previas sincronizadas en Supabase
   }
 
-  const deltaSeed = hashSeed(`${pol.id}_${nextCount}_${Date.now()}`);
-  const deltaPos = ((deltaSeed % 9) - 4) * 0.8;
-  const deltaNeg = (((deltaSeed >> 3) % 9) - 4) * 0.7;
+  const finalMenciones = liveMenciones.length > 0 ? liveMenciones : (prev.liveMenciones || null);
+  const seed = hashSeed(pol.id + pol.nombre);
+  const { deltaPos, deltaNeg } = calcularDeltasMenciones(finalMenciones || [], seed, nextCount);
 
   overrides[pol.id] = {
     count: nextCount,
-    deltaPos: +deltaPos.toFixed(1),
-    deltaNeg: +deltaNeg.toFixed(1),
+    deltaPos,
+    deltaNeg,
     updatedAt: ahora,
-    liveMenciones: liveMenciones.length > 0 ? liveMenciones : null
+    liveMenciones: finalMenciones
   };
   saveCloudOverrides(overrides);
 
@@ -402,10 +427,10 @@ export async function refreshCloudPolitico(pol) {
         body: {
           politico_id: pol.id,
           count: nextCount,
-          delta_pos: +deltaPos.toFixed(1),
-          delta_neg: +deltaNeg.toFixed(1),
+          delta_pos: deltaPos,
+          delta_neg: deltaNeg,
           updated_at: ahora,
-          live_menciones: liveMenciones.length > 0 ? liveMenciones : null
+          live_menciones: finalMenciones
         }
       });
     } catch (e) {}
@@ -414,29 +439,29 @@ export async function refreshCloudPolitico(pol) {
 }
 
 export async function refreshCloudAmbito(ambito) {
+  await sbSyncOverridesFromCloud();
   const list = getCloudPoliticos(ambito);
   const overrides = getCloudOverrides();
   const ahora = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
   const batch = [];
 
-  list.forEach((pol, idx) => {
+  list.forEach((pol) => {
     const prev = overrides[pol.id] || { count: 0 };
     const nextCount = (prev.count || 0) + 1;
-    const deltaSeed = hashSeed(`${pol.id}_${nextCount}_${Date.now()}_${idx}`);
-    const deltaPos = ((deltaSeed % 9) - 4) * 0.8;
-    const deltaNeg = (((deltaSeed >> 3) % 9) - 4) * 0.7;
+    const seed = hashSeed(pol.id + pol.nombre);
+    const { deltaPos, deltaNeg } = calcularDeltasMenciones(prev.liveMenciones || [], seed, nextCount);
     overrides[pol.id] = {
       ...prev,
       count: nextCount,
-      deltaPos: +deltaPos.toFixed(1),
-      deltaNeg: +deltaNeg.toFixed(1),
+      deltaPos,
+      deltaNeg,
       updatedAt: ahora
     };
     batch.push({
       politico_id: pol.id,
       count: nextCount,
-      delta_pos: +deltaPos.toFixed(1),
-      delta_neg: +deltaNeg.toFixed(1),
+      delta_pos: deltaPos,
+      delta_neg: deltaNeg,
       updated_at: ahora,
       live_menciones: prev.liveMenciones || null
     });
@@ -567,7 +592,12 @@ export function generateCloudDebates(pol) {
 export function generateCloudMenciones(pol) {
   const overrides = getCloudOverrides()[pol.id];
   if (overrides?.liveMenciones && overrides.liveMenciones.length > 0) {
-    return overrides.liveMenciones;
+    return overrides.liveMenciones.slice(0, 4).map((m, idx) => ({
+      id: m.id || idx + 1,
+      sentimiento: m.sentimiento || 'neu',
+      fuente: m.fuente || (pol.ambito === 'nacional' ? 'Prensa Nacional' : 'Prensa TDF'),
+      texto: (m.texto || '').replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim()
+    }));
   }
   const etiqueta = pol.ambito === "nacional" ? "Prensa Nacional" : "Prensa TDF";
   const stamp = overrides?.updatedAt ? ` (${overrides.updatedAt})` : "";

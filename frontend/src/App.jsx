@@ -22,6 +22,7 @@ import {
   getSupabaseConfig,
   saveSupabaseConfig,
   isSupabaseConfigured,
+  sbSyncOverridesFromCloud,
   sbFetchPoliticos,
   sbSwapPolitico,
   sbFetchSolicitudes,
@@ -329,6 +330,11 @@ function App() {
 
   const fetchMetricas = async (id, polObj = selectedPolitico) => {
     try {
+      if (isSupabaseConfigured() && polObj) {
+        await sbSyncOverridesFromCloud();
+        setMetricas(generateCloudMetricas(polObj));
+        return;
+      }
       const response = await axios.get(`${API_URL}/politicos/${id}/metricas`);
       if (!Array.isArray(response.data) || response.data.length === 0) throw new Error("Cloudflare static fallback");
 
@@ -371,6 +377,11 @@ function App() {
   const fetchMencionesRandom = async (id, polObj = selectedPolitico) => {
     setLoadingMenciones(true);
     try {
+      if (isSupabaseConfigured() && polObj) {
+        await sbSyncOverridesFromCloud();
+        setMencionesRandom(generateCloudMenciones(polObj));
+        return;
+      }
       const response = await axios.get(`${API_URL}/politicos/${id}/menciones/random?limit=4`);
       if (!Array.isArray(response.data) || response.data.length === 0) throw new Error("Cloudflare static fallback");
       setMencionesRandom(response.data);
@@ -384,6 +395,12 @@ function App() {
   const fetchDebates = async (id, polObj = selectedPolitico) => {
     setLoadingDebates(true);
     try {
+      if (isSupabaseConfigured() && polObj) {
+        const d = generateCloudDebates(polObj);
+        setDebates(d);
+        setSelectedDebate(d[0] || null);
+        return;
+      }
       const response = await axios.get(`${API_URL}/politicos/${id}/debates`);
       if (!Array.isArray(response.data) || response.data.length === 0) throw new Error("Cloudflare static fallback");
       setDebates(response.data);

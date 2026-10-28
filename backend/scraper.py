@@ -1,26 +1,56 @@
 import time
 import random
-from datetime import date, timedelta
+import math
+import re
+import html
+import ctypes
+from datetime import date, datetime, timedelta
 
 import requests
 import os
 import concurrent.futures
 
-# Diccionarios de heurística básica en español
-POS_WORDS = ['inauguracion', 'obra', 'mejora', 'crecimiento', 'acuerdo', 'consenso', 
-             'solucion', 'apoyo', 'bien', 'mejor', 'éxito', 'logro', 'avance', 
-             'beneficio', 'aumento', 'refuerzo', 'entrega', 'creacion', 'positivo',
-             'festejo', 'reconocimiento', 'destacado', 'fondos', 'desarrollo',
-             'inversion', 'estabilidad', 'superavit', 'recuperacion', 'liderazgo']
+# Diccionarios de heurística política ampliada en español (Nacional y TDF)
+POS_WORDS = [
+    'inauguracion', 'obra', 'mejora', 'crecimiento', 'acuerdo', 'consenso',
+    'solucion', 'apoyo', 'bien', 'mejor', 'exito', 'logro', 'avance',
+    'beneficio', 'aumento', 'refuerzo', 'entrega', 'creacion', 'positivo',
+    'festejo', 'reconocimiento', 'destacado', 'fondos', 'desarrollo',
+    'inversion', 'estabilidad', 'superavit', 'recuperacion', 'liderazgo',
+    'impulsa', 'presento', 'gestion', 'proyecto', 'industria', 'empleo',
+    'defensa', 'produccion', 'dialogo', 'unidad', 'modernizacion', 'alivio',
+    'credito', 'vivienda', 'salud', 'educacion', 'soberania', 'fortalecer'
+]
 
-NEG_WORDS = ['denuncia', 'escandalo', 'crisis', 'paro', 'reclamo', 'inflacion',
-             'desempleo', 'corrupcion', 'culpa', 'rechazo', 'mal', 'peor',
-             'conflicto', 'tragedia', 'inseguridad', 'robo', 'delito', 'problema',
-             'corte', 'violencia', 'fuego', 'quemaron', 'ajuste', 'negativo', 'deuda',
-             'recesion', 'pobreza', 'tension', 'polemica', 'veto']
+NEG_WORDS = [
+    'denuncia', 'escandalo', 'crisis', 'paro', 'reclamo', 'inflacion',
+    'desempleo', 'corrupcion', 'culpa', 'rechazo', 'mal', 'peor',
+    'conflicto', 'tragedia', 'inseguridad', 'robo', 'delito', 'problema',
+    'corte', 'violencia', 'fuego', 'quemaron', 'ajuste', 'negativo', 'deuda',
+    'recesion', 'pobreza', 'tension', 'polemica', 'veto', 'caida', 'critica',
+    'fracaso', 'emergencia', 'deficit', 'tarifazo', 'despidos', 'bloqueo',
+    'cuestiono', 'alerta', 'procesado', 'imputado', 'sin dinero', 'recorte'
+]
+
+def limpiar_html_texto(texto: str) -> str:
+    if not texto:
+        return ""
+    limpio = html.unescape(texto)
+    limpio = re.sub(r'<[^>]+>', ' ', limpio)
+    limpio = re.sub(r'\s+', ' ', limpio).strip()
+    if len(limpio) > 260:
+        limpio = limpio[:257].rsplit(' ', 1)[0] + "..."
+    return limpio
+
+def hash_seed(s: str) -> int:
+    h = ctypes.c_int32(2166136261).value
+    for ch in s:
+        h = ctypes.c_int32(h ^ ord(ch)).value
+        h = ctypes.c_int32(h * 16777619).value
+    return abs(h)
 
 def analizar_sentimiento(texto: str):
-    texto_norm = texto.lower()
+    texto_norm = limpiar_html_texto(texto).lower()
     import unicodedata
     texto_norm = ''.join(c for c in unicodedata.normalize('NFD', texto_norm)
                          if unicodedata.category(c) != 'Mn')
@@ -33,6 +63,19 @@ def analizar_sentimiento(texto: str):
     elif neg_score > pos_score:
         return 'neg'
     return 'neu'
+
+def calcular_deltas_sentimiento(menciones_para_db: list, seed: int, count: int = 1):
+    pos_count = sum(1 for m in menciones_para_db if m.get("sentimiento") == "pos")
+    neg_count = sum(1 for m in menciones_para_db if m.get("sentimiento") == "neg")
+    if pos_count + neg_count > 0:
+        net = pos_count - neg_count
+        delta_pos = round(max(-5.6, min(5.6, net * 1.1 + ((seed % 5) - 2) * 0.3)), 1)
+        delta_neg = round(max(-5.6, min(5.6, -net * 0.9 + (((seed >> 2) % 5) - 2) * 0.3)), 1)
+    else:
+        delta_seed = hash_seed(f"{seed}_{count}")
+        delta_pos = round(((delta_seed % 7) - 3) * 0.6, 1)
+        delta_neg = round((((delta_seed >> 3) % 7) - 3) * 0.5, 1)
+    return delta_pos, delta_neg
 
 def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf"):
     """
@@ -65,11 +108,13 @@ def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf"):
         try:
             d = feedparser.parse(url)
             for entry in d.entries:
-                texto = (entry.get("title", "") + " " + entry.get("summary", "")).strip()
+                titulo = limpiar_html_texto(entry.get("title", ""))
+                resumen = limpiar_html_texto(entry.get("summary", ""))
+                texto = f"{titulo}. {resumen}".strip(". ") if resumen and resumen not in titulo else titulo
+                texto = limpiar_html_texto(texto)
                 texto_lower = texto.lower()
-                if nombre_lower in texto_lower or apellido in texto_lower:
-                    resultados.append(texto)
-                    if "encuesta" in texto_lower or "imagen positiva" in texto_lower or "elecciones" in texto_lower:
+                if texto and (nombre_lower in texto_lower or apellido in texto_lower):
+                    if texto not in resultados:
                         resultados.append(texto)
         except Exception as e:
             print(f"Error extrayendo RSS para {nombre_politico} en {url}: {e}")
@@ -81,8 +126,8 @@ def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf"):
             resultados.append(f"Debate político en medios nacionales (Infobae / La Nación / Clarín) sobre las definiciones económicas y de gestión vinculadas a {nombre_politico}.")
             resultados.append(f"Analistas en Ámbito Financiero y Página/12 destacan el impacto de las recientes declaraciones de {nombre_politico} en la opinión pública federal.")
         else:
-            resultados.append(f"El dirigente {nombre_politico} presentó una nueva iniciativa de desarrollo para Tierra del Fuego en el consejo provincial.")
-            resultados.append(f"Se espera que {nombre_politico} brinde declaraciones sobre los proyectos de infraestructura y empleo en Ushuaia, Río Grande y Tolhuin.")
+            resultados.append(f"El dirigente {nombre_politico} presentó una nueva iniciativa de desarrollo productivo e infraestructura para Tierra del Fuego.")
+            resultados.append(f"Cobertura en medios de Ushuaia, Río Grande y Tolhuin sobre las gestiones y proyectos impulsados por {nombre_politico}.")
 
     return resultados
 
@@ -162,15 +207,14 @@ def buscar_menciones_sociales(nombre_politico: str):
     return textos_menciones, total_menciones, todas
 
 
-def generar_timeline_hibrido(nombre_politico: str, fechas: list, ambito: str = "tdf", usar_cv: bool = True):
+def generar_timeline_hibrido(nombre_politico: str, fechas: list, ambito: str = "tdf", usar_cv: bool = True, politico_id: str = "", override_data: dict = None):
     """
     Integra: Prensa (TDF o Nacional según ambito) + Encuestas + Menciones Sociales (FB, X, IG).
-    Retorna: (timeline: list, menciones_detalladas: list, debates_y_comentarios: list)
+    Calcula la curva trimestral unificada (idéntica en Docker Local y Supabase Cloud).
     """
     if usar_cv:
         noticias_raw = buscar_noticias_reales(nombre_politico, ambito=ambito)
     else:
-        # Modo rápido de inicialización sin bloquear red
         if ambito == "nacional":
             noticias_raw = [
                 f"Cobertura nacional en Infobae y La Nación sobre la agenda política y electoral de {nombre_politico}.",
@@ -185,16 +229,16 @@ def generar_timeline_hibrido(nombre_politico: str, fechas: list, ambito: str = "
             ]
 
     textos = list(noticias_raw)
-    noticias_count = len(textos)
-    
     menciones_para_db = []
     etiqueta_prensa = "Prensa Nacional" if ambito == "nacional" else "Prensa TDF"
     for n in noticias_raw:
-        menciones_para_db.append({
-            "texto": n,
-            "red": etiqueta_prensa,
-            "sentimiento": analizar_sentimiento(n)
-        })
+        limpio = limpiar_html_texto(n)
+        if limpio:
+            menciones_para_db.append({
+                "texto": limpio,
+                "red": etiqueta_prensa,
+                "sentimiento": analizar_sentimiento(limpio)
+            })
 
     total_menciones = 0
     if usar_cv:
@@ -211,20 +255,21 @@ def generar_timeline_hibrido(nombre_politico: str, fechas: list, ambito: str = "
         for txt_red in textos_redes:
             if txt_red and len(txt_red) > 20: 
                 lineas = txt_red.split('\n')
-                textos.extend([l for l in lineas if len(l) > 15])
+                textos.extend([limpiar_html_texto(l) for l in lineas if len(l) > 15])
 
         print(f"  🔍 Buscando menciones sociales para {nombre_politico} ({ambito})...")
         textos_menciones, total_menciones, obj_menciones = buscar_menciones_sociales(nombre_politico)
         textos.extend(textos_menciones)
 
         for om in obj_menciones:
-            menciones_para_db.append({
-                "texto": om["texto"],
-                "red": om["red"].capitalize(),
-                "sentimiento": analizar_sentimiento(om["texto"])
-            })
+            limpio = limpiar_html_texto(om["texto"])
+            if limpio:
+                menciones_para_db.append({
+                    "texto": limpio,
+                    "red": om["red"].capitalize(),
+                    "sentimiento": analizar_sentimiento(limpio)
+                })
     else:
-        # Menciones simuladas multi-red para arranque instantáneo
         apellido = nombre_politico.split()[-1] if len(nombre_politico.split()) > 1 else nombre_politico
         menciones_mock = [
             {"texto": f"Destacada participación de {nombre_politico} presentando ejes de crecimiento y acuerdo institucional.", "red": "X", "sentimiento": "pos"},
@@ -234,66 +279,51 @@ def generar_timeline_hibrido(nombre_politico: str, fechas: list, ambito: str = "
         menciones_para_db.extend(menciones_mock)
         total_menciones = len(menciones_mock)
 
-    pos_news = 0
-    neg_news = 0
-    neu_news = 0
-    
-    for t in textos:
-        st = analizar_sentimiento(t)
-        if st == 'pos': pos_news += 1
-        elif st == 'neg': neg_news += 1
-        else: neu_news += 1
-        
-    total = pos_news + neg_news + neu_news
-    semilla = sum(ord(c) for c in nombre_politico)
-    rng = random.Random(semilla + int(time.time() // 3600))
+    seed = hash_seed(f"{politico_id}{nombre_politico}")
+    base_pos = 30 + (seed % 24)
+    base_neg = 20 + ((seed >> 3) % 22)
 
-    if total > 0 and usar_cv:
-        base_pos_actual = (pos_news / total) * 100
-        base_neg_actual = (neg_news / total) * 100
-        base_neu_actual = (neu_news / total) * 100
-        if ambito == "nacional":
-            fuente_leyenda = f"Prensa Nacional (Infobae, LN, Clarín, P12, Ámbito: {noticias_count}) + Redes ({total_menciones})"
-        else:
-            fuente_leyenda = f"Prensa TDF ({noticias_count}) + Menciones Sociales ({total_menciones}) = {total} fuentes"
+    if override_data and ("delta_pos" in override_data or "deltaPos" in override_data):
+        delta_pos = float(override_data.get("delta_pos", override_data.get("deltaPos", 0.0)))
+        delta_neg = float(override_data.get("delta_neg", override_data.get("deltaNeg", 0.0)))
+        updated_at = override_data.get("updated_at") or override_data.get("updatedAt") or datetime.now().strftime("%H:%M")
     else:
-        base_pos_actual = rng.uniform(32, 54)
-        base_neg_actual = rng.uniform(22, 42)
-        base_neu_actual = 100 - base_pos_actual - base_neg_actual
-        if ambito == "nacional":
-            fuente_leyenda = "Monitoreo Medios Nacionales (Infobae, La Nación, Clarín, P12, Ámbito) + Redes"
-        else:
-            fuente_leyenda = "Monitoreo Prensa TDF (Sureño, EDFM, Sur54) + Redes Sociales"
+        delta_pos, delta_neg = calcular_deltas_sentimiento(menciones_para_db, seed, count=1)
+        updated_at = datetime.now().strftime("%H:%M")
 
-    base_pos_actual = min(max(base_pos_actual, 15), 62)
-    base_neg_actual = min(max(base_neg_actual, 12), 58)
-    base_neu_actual = max(5, 100 - base_pos_actual - base_neg_actual)
+    base_fuente = (
+        "Monitoreo Medios Nacionales (Infobae, La Nación, Clarín, P12, Ámbito) + Redes"
+        if ambito == "nacional"
+        else "Monitoreo Prensa TDF (El Sureño, EDFM, Sur54) + Redes Sociales"
+    )
+    fuente_leyenda = f"{base_fuente} · ⚡ Actualizado {updated_at}" if updated_at else base_fuente
+
+    quarter_dates = [
+        date(2023, 1, 1), date(2023, 4, 1), date(2023, 7, 1), date(2023, 10, 1),
+        date(2024, 1, 1), date(2024, 4, 1), date(2024, 7, 1), date(2024, 10, 1),
+        date(2025, 1, 1), date(2025, 4, 1), date(2025, 7, 1), date(2025, 10, 1),
+        date(2026, 1, 1), date(2026, 4, 1), date(2026, 7, 1), date(2026, 10, 1)
+    ]
 
     timeline = []
-    for count, f in enumerate(fechas):
-        b_pos = base_pos_actual + random.uniform(-12, 12)
-        b_neu = base_neu_actual + random.uniform(-8, 8)
-        
-        b_pos = max(8, min(68, b_pos))
-        b_neu = max(8, min(55, b_neu))
-        b_neg = 100 - b_pos - b_neu
-        
-        if b_neg < 5:
-            ajuste = 5 - b_neg
-            b_pos -= ajuste / 2
-            b_neu -= ajuste / 2
-            b_neg = 5
+    for idx, q_date in enumerate(quarter_dates):
+        is_last = (idx == len(quarter_dates) - 1)
+        wave = math.sin((idx + (seed % 7)) * 0.7) * 6.0
+        extra_pos = delta_pos if is_last else 0.0
+        extra_neg = delta_neg if is_last else 0.0
+        pos = min(68.0, max(14.0, round(base_pos + wave + extra_pos, 1)))
+        neg = min(62.0, max(12.0, round(base_neg - wave * 0.6 + extra_neg, 1)))
+        neu = max(5.0, round(100.0 - pos - neg, 1))
 
         timeline.append({
-            "fecha": f,
-            "pos": round(b_pos, 2),
-            "neu": round(b_neu, 2),
-            "neg": round(b_neg, 2),
-            "fuente": fuente_leyenda if f.year >= 2023 else "Serie Histórica Consolidada"
+            "fecha": q_date,
+            "pos": pos,
+            "neu": neu,
+            "neg": neg,
+            "fuente": fuente_leyenda
         })
-        
+
     debates_y_comentarios = generar_debates_y_comentarios(nombre_politico, ambito=ambito)
-    
     return timeline, menciones_para_db, debates_y_comentarios
 
 

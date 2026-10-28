@@ -162,23 +162,96 @@ POLITICOS_INICIALES = [
 ]
 
 def obtener_rango_fechas():
-    start_date = date(2022, 1, 1)
-    end_date = date.today()
-    fechas = []
-    current_date = start_date
-    while current_date <= end_date:
-        fechas.append(current_date)
-        next_month = current_date.month % 12 + 1
-        year_add = 1 if current_date.month == 12 else 0
-        current_date = date(current_date.year + year_add, next_month, 1)
-    return fechas
+    return [
+        date(2023, 1, 1), date(2023, 4, 1), date(2023, 7, 1), date(2023, 10, 1),
+        date(2024, 1, 1), date(2024, 4, 1), date(2024, 7, 1), date(2024, 10, 1),
+        date(2025, 1, 1), date(2025, 4, 1), date(2025, 7, 1), date(2025, 10, 1),
+        date(2026, 1, 1), date(2026, 4, 1), date(2026, 7, 1), date(2026, 10, 1)
+    ]
 
-def guardar_datos_politico(db: Session, pol: Politico, usar_cv: bool = True):
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://chpbuggadgdwkfyhmblq.supabase.co").rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_qw_umQaUIhAAlUnnQ0B7YQ_tUhQUdoT")
+
+def obtener_override_supabase(politico_id: str) -> Optional[dict]:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    try:
+        res = scraper.requests.get(
+            f"{SUPABASE_URL}/rest/v1/cloud_overrides",
+            params={"politico_id": f"eq.{politico_id}", "select": "*"},
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}"
+            },
+            timeout=6
+        )
+        if res.status_code == 200:
+            rows = res.json()
+            if isinstance(rows, list) and len(rows) > 0:
+                return rows[0]
+    except Exception as e:
+        print(f"Aviso leyendo override de Supabase para {politico_id}: {e}")
+    return None
+
+def sincronizar_override_supabase(pol: Politico, menciones_generadas: list, delta_pos: float, delta_neg: float, updated_at: str):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return
+    try:
+        prev = obtener_override_supabase(pol.id) or {}
+        next_count = int(prev.get("count") or 0) + 1
+        live_menciones = []
+        for idx, m in enumerate(menciones_generadas[:8]):
+            live_menciones.append({
+                "id": int(datetime.now().timestamp() * 1000) + idx,
+                "sentimiento": m.get("sentimiento", "neu"),
+                "fuente": m.get("red") or m.get("fuente") or ("Prensa Nacional" if pol.ambito == "nacional" else "Prensa TDF"),
+                "texto": m.get("texto", "")
+            })
+        payload = {
+            "politico_id": pol.id,
+            "count": next_count,
+            "delta_pos": round(float(delta_pos), 1),
+            "delta_neg": round(float(delta_neg), 1),
+            "updated_at": updated_at,
+            "live_menciones": live_menciones if live_menciones else prev.get("live_menciones")
+        }
+        scraper.requests.post(
+            f"{SUPABASE_URL}/rest/v1/cloud_overrides",
+            json=payload,
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=minimal"
+            },
+            timeout=8
+        )
+    except Exception as e:
+        print(f"Aviso sincronizando Supabase para {pol.id}: {e}")
+
+def guardar_datos_politico(db: Session, pol: Politico, usar_cv: bool = True, sync_supabase: bool = False):
     fechas = obtener_rango_fechas()
+    override_actual = None if sync_supabase else obtener_override_supabase(pol.id)
     timeline_generada, menciones_generadas, debates_generados = scraper.generar_timeline_hibrido(
-        pol.nombre, fechas, ambito=pol.ambito or "tdf", usar_cv=usar_cv
+        pol.nombre, fechas, ambito=pol.ambito or "tdf", usar_cv=usar_cv, politico_id=pol.id, override_data=override_actual
     )
-    
+
+    seed = scraper.hash_seed(f"{pol.id}{pol.nombre}")
+    if sync_supabase:
+        delta_pos, delta_neg = scraper.calcular_deltas_sentimiento(menciones_generadas, seed, count=1)
+        ahora_str = datetime.now().strftime("%H:%M")
+        sincronizar_override_supabase(pol, menciones_generadas, delta_pos, delta_neg, ahora_str)
+    elif override_actual and isinstance(override_actual.get("live_menciones"), list) and len(override_actual["live_menciones"]) > 0:
+        menciones_generadas = [
+            {
+                "texto": m.get("texto", ""),
+                "red": m.get("fuente", "Prensa"),
+                "sentimiento": m.get("sentimiento", "neu")
+            }
+            for m in override_actual["live_menciones"]
+            if m.get("texto")
+        ]
+
     for t in timeline_generada:
         db.add(MetricaImagen(
             politico_id=pol.id,
@@ -267,12 +340,19 @@ def asegurar_esquema_y_datos():
             ))
             db.commit()
 
-        # 4. Asegurar datos base (métricas, debates, menciones) para todo político que aún no tenga
+        # 4. Limpiar duplicado residual de prueba si existiera y sincronizar las 16 métricas trimestrales
+        dup_test = db.query(Politico).filter(Politico.id == "javiermilei", Politico.ambito == "tdf").first()
+        if dup_test:
+            db.delete(dup_test)
+            db.commit()
+
         todos_politicos = db.query(Politico).all()
         for pol in todos_politicos:
-            tiene_metricas = db.query(MetricaImagen).filter(MetricaImagen.politico_id == pol.id).first()
-            if not tiene_metricas:
-                guardar_datos_politico(db, pol, usar_cv=False)
+            cant_metricas = db.query(MetricaImagen).filter(MetricaImagen.politico_id == pol.id).count()
+            if cant_metricas != 16:
+                db.query(MetricaImagen).filter(MetricaImagen.politico_id == pol.id).delete()
+                db.commit()
+                guardar_datos_politico(db, pol, usar_cv=False, sync_supabase=False)
                 db.commit()
     except Exception as e:
         db.rollback()
@@ -449,9 +529,9 @@ async def run_extraccion_real(ambito: Optional[str] = None, db: Session = Depend
             db.query(DebatePublicacion).filter(DebatePublicacion.politico_id == pol.id).delete(synchronize_session=False)
             db.commit()
 
-            guardar_datos_politico(db, pol, usar_cv=True)
+            guardar_datos_politico(db, pol, usar_cv=True, sync_supabase=True)
             db.commit()
-            print(f"✓ {pol.nombre} completado.")
+            print(f"✓ {pol.nombre} completado y sincronizado en Supabase.")
         except Exception as e:
             db.rollback()
             print(f"✕ Falla scraper con {pol.nombre}: {e}")
@@ -475,7 +555,7 @@ async def run_scrappear_uno(politico_id: str, db: Session = Depends(get_db)):
         db.query(DebatePublicacion).filter(DebatePublicacion.politico_id == pol.id).delete(synchronize_session=False)
         db.commit()
 
-        guardar_datos_politico(db, pol, usar_cv=True)
+        guardar_datos_politico(db, pol, usar_cv=True, sync_supabase=True)
         db.commit()
         return {"status": "success", "mensaje": f"Perfil de {pol.nombre} actualizado."}
     except Exception as e:
