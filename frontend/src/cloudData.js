@@ -91,8 +91,8 @@ function hashSeed(str) {
 // ============================================================================
 // CONECTOR SUPABASE REST 24/7 (OPCIÓN A — SIN DOCKER NI SERVIDOR LOCAL)
 // ============================================================================
-const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const DEFAULT_SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://chpbuggadgdwkfyhmblq.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_qw_umQaUIhAAlUnnQ0B7YQ_tUhQUdoT';
 
 export function getSupabaseConfig() {
   try {
@@ -187,6 +187,23 @@ export async function sbFetchPoliticos(ambito) {
     ? `politicos?ambito=eq.${encodeURIComponent(ambito)}&select=*`
     : 'politicos?select=*';
   const rows = await sbRequest(query);
+  if (Array.isArray(rows) && rows.length === 0) {
+    try {
+      await sbRequest('politicos', {
+        method: 'POST',
+        prefer: 'resolution=ignore-duplicates',
+        body: INITIAL_POLITICOS
+      });
+      await sbRequest('usuarios', {
+        method: 'POST',
+        prefer: 'resolution=ignore-duplicates',
+        body: INITIAL_USUARIOS.map(({ username, nombre_mostrar, password, rol }) => ({ username, nombre_mostrar, password, rol }))
+      });
+    } catch (e) {}
+    const retryRows = await sbRequest(query);
+    if (Array.isArray(retryRows) && retryRows.length > 0) return retryRows;
+    throw new Error('Empty politicos in Supabase');
+  }
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new Error('Empty politicos in Supabase');
   }
