@@ -88,6 +88,204 @@ function hashSeed(str) {
   return Math.abs(h);
 }
 
+// ============================================================================
+// CONECTOR SUPABASE REST 24/7 (OPCIÓN A — SIN DOCKER NI SERVIDOR LOCAL)
+// ============================================================================
+const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const DEFAULT_SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+export function getSupabaseConfig() {
+  try {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlParam = params.get('sb_url');
+      const keyParam = params.get('sb_key');
+      if (urlParam && keyParam) {
+        const cfg = { url: urlParam.trim().replace(/\/+$/, ''), key: keyParam.trim() };
+        localStorage.setItem('tdf_supabase_config_v1', JSON.stringify(cfg));
+        return cfg;
+      }
+      const saved = localStorage.getItem('tdf_supabase_config_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.url && parsed.key) return parsed;
+      }
+    }
+  } catch (e) {}
+  return {
+    url: DEFAULT_SUPABASE_URL ? DEFAULT_SUPABASE_URL.replace(/\/+$/, '') : '',
+    key: DEFAULT_SUPABASE_ANON_KEY || ''
+  };
+}
+
+export function saveSupabaseConfig(url, key) {
+  const cleanUrl = (url || '').trim().replace(/\/+$/, '');
+  const cleanKey = (key || '').trim();
+  const cfg = { url: cleanUrl, key: cleanKey };
+  try {
+    if (!cleanUrl || !cleanKey) {
+      localStorage.removeItem('tdf_supabase_config_v1');
+    } else {
+      localStorage.setItem('tdf_supabase_config_v1', JSON.stringify(cfg));
+    }
+  } catch (e) {}
+  return cfg;
+}
+
+export function isSupabaseConfigured() {
+  const { url, key } = getSupabaseConfig();
+  return Boolean(url && key && url.startsWith('http'));
+}
+
+export async function sbRequest(path, { method = 'GET', body = null, prefer = 'return=representation' } = {}) {
+  const { url, key } = getSupabaseConfig();
+  if (!url || !key) throw new Error('Supabase not configured');
+  const headers = {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json'
+  };
+  if (prefer) headers.Prefer = prefer;
+  const res = await fetch(`${url}/rest/v1/${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Supabase error (${res.status}): ${txt}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+export async function sbSyncOverridesFromCloud() {
+  if (!isSupabaseConfigured()) return getCloudOverrides();
+  try {
+    const rows = await sbRequest('cloud_overrides?select=*');
+    if (Array.isArray(rows)) {
+      const current = getCloudOverrides();
+      rows.forEach(r => {
+        current[r.politico_id] = {
+          count: r.count || 1,
+          deltaPos: Number(r.delta_pos || 0),
+          deltaNeg: Number(r.delta_neg || 0),
+          updatedAt: r.updated_at || '',
+          liveMenciones: r.live_menciones || null
+        };
+      });
+      saveCloudOverrides(current);
+      return current;
+    }
+  } catch (e) {}
+  return getCloudOverrides();
+}
+
+export async function sbFetchPoliticos(ambito) {
+  await sbSyncOverridesFromCloud();
+  const query = ambito
+    ? `politicos?ambito=eq.${encodeURIComponent(ambito)}&select=*`
+    : 'politicos?select=*';
+  const rows = await sbRequest(query);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Empty politicos in Supabase');
+  }
+  return rows;
+}
+
+export async function sbSwapPolitico(oldId, nuevoPol) {
+  await sbRequest(`politicos?id=eq.${encodeURIComponent(oldId)}`, { method: 'DELETE' });
+  const inserted = await sbRequest('politicos', {
+    method: 'POST',
+    body: nuevoPol
+  });
+  return Array.isArray(inserted) ? inserted[0] : nuevoPol;
+}
+
+export async function sbFetchSolicitudes() {
+  return await sbRequest('solicitudes_cambio?select=*&order=id.desc');
+}
+
+export async function sbCreateSolicitud(nuevaSol, msgChat) {
+  const inserted = await sbRequest('solicitudes_cambio', {
+    method: 'POST',
+    body: nuevaSol
+  });
+  await sbRequest('mensajes_chat', {
+    method: 'POST',
+    body: msgChat
+  });
+  return Array.isArray(inserted) ? inserted[0] : nuevaSol;
+}
+
+export async function sbResolveSolicitud(solicitud, accion, notaAdmin, adminNombre) {
+  const nuevoEstado = accion === 'aprobar' ? 'aprobada' : 'rechazada';
+  const notaFinal = notaAdmin || (accion === 'aprobar' ? 'Aprobado y ejecutado en el directorio.' : 'Solicitud rechazada.');
+  await sbRequest(`solicitudes_cambio?id=eq.${solicitud.id}`, {
+    method: 'PATCH',
+    body: { estado: nuevoEstado, nota_admin: notaFinal }
+  });
+  const ahora = new Date().toLocaleString('es-AR', { hour12: false });
+  let nuevoPol = null;
+  if (accion === 'aprobar') {
+    const newId = solicitud.new_politico_nombre.toLowerCase().replace(/[^a-z0-9]/g, '') || `pol_${Date.now()}`;
+    nuevoPol = {
+      id: newId,
+      nombre: solicitud.new_politico_nombre,
+      cargo: solicitud.new_politico_cargo,
+      categoria: 'Primera línea',
+      ambito: solicitud.ambito || 'tdf'
+    };
+    await sbSwapPolitico(solicitud.old_politico_id, nuevoPol);
+    await sbRequest('mensajes_chat', {
+      method: 'POST',
+      body: {
+        autor_nombre: adminNombre || 'Administrador General',
+        autor_rol: 'admin',
+        ambito: solicitud.ambito || 'tdf',
+        texto: `✅ Solicitud aprobada: Se reemplazó a ${solicitud.old_politico_nombre} por ${nuevoPol.nombre} (${nuevoPol.cargo}). ${notaFinal}`,
+        fecha_hora: ahora
+      }
+    });
+  } else {
+    await sbRequest('mensajes_chat', {
+      method: 'POST',
+      body: {
+        autor_nombre: adminNombre || 'Administrador General',
+        autor_rol: 'admin',
+        ambito: solicitud.ambito || 'tdf',
+        texto: `❌ Solicitud sobre ${solicitud.old_politico_nombre} → ${solicitud.new_politico_nombre} rechazada. Motivo: ${notaFinal}`,
+        fecha_hora: ahora
+      }
+    });
+  }
+  return nuevoPol;
+}
+
+export async function sbFetchChat() {
+  return await sbRequest('mensajes_chat?select=*&order=id.asc');
+}
+
+export async function sbCreateChat(msg) {
+  const inserted = await sbRequest('mensajes_chat', {
+    method: 'POST',
+    body: msg
+  });
+  return Array.isArray(inserted) ? inserted[0] : msg;
+}
+
+export async function sbFetchUsuarios() {
+  return await sbRequest('usuarios?select=*&order=id.asc');
+}
+
+export async function sbCreateUsuario(userObj) {
+  const inserted = await sbRequest('usuarios', {
+    method: 'POST',
+    body: userObj
+  });
+  return Array.isArray(inserted) ? inserted[0] : userObj;
+}
+
 const POS_WORDS = [
   'inauguracion', 'obra', 'mejora', 'crecimiento', 'acuerdo', 'consenso',
   'solucion', 'apoyo', 'bien', 'mejor', 'exito', 'logro', 'avance',
@@ -178,6 +376,23 @@ export async function refreshCloudPolitico(pol) {
     liveMenciones: liveMenciones.length > 0 ? liveMenciones : null
   };
   saveCloudOverrides(overrides);
+
+  if (isSupabaseConfigured()) {
+    try {
+      await sbRequest('cloud_overrides', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates',
+        body: {
+          politico_id: pol.id,
+          count: nextCount,
+          delta_pos: +deltaPos.toFixed(1),
+          delta_neg: +deltaNeg.toFixed(1),
+          updated_at: ahora,
+          live_menciones: liveMenciones.length > 0 ? liveMenciones : null
+        }
+      });
+    } catch (e) {}
+  }
   return overrides[pol.id];
 }
 
@@ -185,6 +400,7 @@ export async function refreshCloudAmbito(ambito) {
   const list = getCloudPoliticos(ambito);
   const overrides = getCloudOverrides();
   const ahora = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  const batch = [];
 
   list.forEach((pol, idx) => {
     const prev = overrides[pol.id] || { count: 0 };
@@ -199,8 +415,26 @@ export async function refreshCloudAmbito(ambito) {
       deltaNeg: +deltaNeg.toFixed(1),
       updatedAt: ahora
     };
+    batch.push({
+      politico_id: pol.id,
+      count: nextCount,
+      delta_pos: +deltaPos.toFixed(1),
+      delta_neg: +deltaNeg.toFixed(1),
+      updated_at: ahora,
+      live_menciones: prev.liveMenciones || null
+    });
   });
   saveCloudOverrides(overrides);
+
+  if (isSupabaseConfigured() && batch.length > 0) {
+    try {
+      await sbRequest('cloud_overrides', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates',
+        body: batch
+      });
+    } catch (e) {}
+  }
 }
 
 export function getCloudPoliticos(ambito) {

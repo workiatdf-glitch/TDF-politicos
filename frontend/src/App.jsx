@@ -18,7 +18,19 @@ import {
   generateCloudDebates,
   generateCloudMenciones,
   refreshCloudPolitico,
-  refreshCloudAmbito
+  refreshCloudAmbito,
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  isSupabaseConfigured,
+  sbFetchPoliticos,
+  sbSwapPolitico,
+  sbFetchSolicitudes,
+  sbCreateSolicitud,
+  sbResolveSolicitud,
+  sbFetchChat,
+  sbCreateChat,
+  sbFetchUsuarios,
+  sbCreateUsuario
 } from './cloudData';
 
 const API_URL = (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
@@ -60,6 +72,12 @@ function App() {
   const [nuevoUserLogin, setNuevoUserLogin] = useState('');
   const [nuevoUserPass, setNuevoUserPass] = useState('');
   const [userCreateMsg, setUserCreateMsg] = useState('');
+
+  // Configuración Supabase 24/7 (Opción A)
+  const [sbUrlInput, setSbUrlInput] = useState(() => getSupabaseConfig().url || '');
+  const [sbKeyInput, setSbKeyInput] = useState(() => getSupabaseConfig().key || '');
+  const [sbConnected, setSbConnected] = useState(() => isSupabaseConfigured());
+  const [sbStatusMsg, setSbStatusMsg] = useState('');
 
   // Datos principales
   const [politicos, setPoliticos] = useState([]);
@@ -128,6 +146,17 @@ function App() {
   const fetchPoliticos = async (ambitoActual = ambito) => {
     setLoading(true);
     try {
+      if (isSupabaseConfigured()) {
+        const sbData = await sbFetchPoliticos(ambitoActual);
+        setPoliticos(sbData);
+        if (sbData.length > 0) {
+          setSelectedPolitico(sbData[0]);
+          setSolOldPoliticoId(sbData[0].id);
+        } else {
+          setSelectedPolitico(null);
+        }
+        return;
+      }
       const response = await axios.get(`${API_URL}/politicos`, {
         params: { ambito: ambitoActual }
       });
@@ -155,6 +184,13 @@ function App() {
 
   const fetchSolicitudes = async () => {
     try {
+      if (isSupabaseConfigured()) {
+        const sbData = await sbFetchSolicitudes();
+        if (Array.isArray(sbData)) {
+          setSolicitudes(sbData);
+          return;
+        }
+      }
       const response = await axios.get(`${API_URL}/solicitudes`);
       if (!Array.isArray(response.data)) throw new Error("Cloudflare static fallback");
       setSolicitudes(response.data);
@@ -166,6 +202,13 @@ function App() {
 
   const fetchChat = async () => {
     try {
+      if (isSupabaseConfigured()) {
+        const sbData = await sbFetchChat();
+        if (Array.isArray(sbData)) {
+          setMensajesChat(sbData);
+          return;
+        }
+      }
       const response = await axios.get(`${API_URL}/chat`);
       if (!Array.isArray(response.data)) throw new Error("Cloudflare static fallback");
       setMensajesChat(response.data);
@@ -177,6 +220,13 @@ function App() {
 
   const fetchUsuarios = async () => {
     try {
+      if (isSupabaseConfigured()) {
+        const sbData = await sbFetchUsuarios();
+        if (Array.isArray(sbData) && sbData.length > 0) {
+          setUsuariosList(sbData);
+          return;
+        }
+      }
       const response = await axios.get(`${API_URL}/usuarios`);
       if (!Array.isArray(response.data)) throw new Error("Cloudflare static fallback");
       setUsuariosList(response.data);
@@ -186,6 +236,39 @@ function App() {
     }
   };
 
+  const handleGuardarSupabase = async (e) => {
+    e.preventDefault();
+    setSbStatusMsg('Probando conexión con Supabase...');
+    saveSupabaseConfig(sbUrlInput, sbKeyInput);
+    const active = isSupabaseConfigured();
+    setSbConnected(active);
+    if (!active) {
+      setSbStatusMsg('ℹ️ Configuración desconectada. Usando motor Cloud autónomo.');
+      return;
+    }
+    try {
+      await fetchPoliticos(ambito);
+      await fetchSolicitudes();
+      await fetchChat();
+      await fetchUsuarios();
+      setSbStatusMsg('✅ Conectado a Supabase 24/7. Datos sincronizados en la nube.');
+    } catch (err) {
+      setSbStatusMsg('⚠️ Verifica que hayas ejecutado supabase_init.sql en el SQL Editor de tu proyecto.');
+    }
+  };
+
+  const handleCopiarLinkEquipoSupabase = () => {
+    const { url, key } = getSupabaseConfig();
+    if (!url || !key) {
+      setSbStatusMsg('Primero guarda la URL y Anon Key de Supabase.');
+      return;
+    }
+    const baseUrl = window.location.origin + window.location.pathname;
+    const shareUrl = `${baseUrl}?sb_url=${encodeURIComponent(url)}&sb_key=${encodeURIComponent(key)}`;
+    navigator.clipboard?.writeText(shareUrl);
+    setSbStatusMsg('📋 ¡Link de equipo copiado! Al abrirlo, tus compañeros quedarán sincronizados con tu Supabase.');
+  };
+
   const handleCrearUsuario = async (e) => {
     e.preventDefault();
     setUserCreateMsg('');
@@ -193,7 +276,22 @@ function App() {
       setUserCreateMsg('Completa nombre, usuario y contraseña.');
       return;
     }
+    const uname = nuevoUserLogin.trim().toLowerCase();
     try {
+      if (isSupabaseConfigured()) {
+        await sbCreateUsuario({
+          username: uname,
+          nombre_mostrar: nuevoUserNombre.trim(),
+          password: nuevoUserPass.trim(),
+          rol: 'visualizador'
+        });
+        setUserCreateMsg(`✅ Credencial creada en Supabase: "${uname}"`);
+        setNuevoUserNombre('');
+        setNuevoUserLogin('');
+        setNuevoUserPass('');
+        await fetchUsuarios();
+        return;
+      }
       const res = await axios.post(`${API_URL}/usuarios`, {
         username: nuevoUserLogin.trim(),
         nombre_mostrar: nuevoUserNombre.trim(),
@@ -201,14 +299,13 @@ function App() {
         rol: 'visualizador'
       });
       if (!res.data || typeof res.data !== 'object' || !res.data.username) throw new Error("Fallback");
-      setUserCreateMsg(`✅ Credencial creada: usuario "${nuevoUserLogin.trim().toLowerCase()}"`);
+      setUserCreateMsg(`✅ Credencial creada: usuario "${uname}"`);
       setNuevoUserNombre('');
       setNuevoUserLogin('');
       setNuevoUserPass('');
       await fetchUsuarios();
     } catch (error) {
       const current = usuariosList.length ? [...usuariosList] : [...INITIAL_USUARIOS];
-      const uname = nuevoUserLogin.trim().toLowerCase();
       if (current.some(u => u.username === uname)) {
         setUserCreateMsg('Ese nombre de usuario ya existe.');
         return;
@@ -358,7 +455,22 @@ function App() {
     }
     setSwapping(true);
     setSwapError("");
+    const newId = newNombre.trim().toLowerCase().replace(/[^a-z0-9]/g, '') || `pol_${Date.now()}`;
+    const nuevoPol = {
+      id: newId,
+      nombre: newNombre.trim(),
+      cargo: newCargo.trim(),
+      categoria: selectedPolitico.categoria || "Primera línea",
+      ambito: ambito
+    };
     try {
+      if (isSupabaseConfigured()) {
+        await sbSwapPolitico(selectedPolitico.id, nuevoPol);
+        await fetchPoliticos(ambito);
+        setSelectedPolitico(nuevoPol);
+        setShowSwapModal(false);
+        return;
+      }
       const response = await axios.post(`${API_URL}/politicos/swap`, {
         old_id: selectedPolitico.id,
         new_nombre: newNombre.trim(),
@@ -374,14 +486,6 @@ function App() {
       }
     } catch (error) {
       const all = getCloudPoliticos();
-      const newId = newNombre.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      const nuevoPol = {
-        id: newId || `pol_${Date.now()}`,
-        nombre: newNombre.trim(),
-        cargo: newCargo.trim(),
-        categoria: selectedPolitico.categoria || "Primera línea",
-        ambito: ambito
-      };
       const updated = all.map(p => p.id === selectedPolitico.id ? nuevoPol : p);
       saveCloudPoliticos(updated);
       setPoliticos(updated.filter(p => p.ambito === ambito));
@@ -429,7 +533,39 @@ function App() {
     }
     setEnviandoSolicitud(true);
     setSolFeedback('');
+    const oldPol = politicos.find(p => p.id === solOldPoliticoId) || selectedPolitico;
+    const ahora = new Date().toLocaleString('es-AR', { hour12: false });
     try {
+      if (isSupabaseConfigured() && oldPol) {
+        await sbCreateSolicitud(
+          {
+            autor_nombre: currentUser.nombre_mostrar,
+            autor_rol: currentUser.rol,
+            ambito,
+            old_politico_id: oldPol.id,
+            old_politico_nombre: oldPol.nombre,
+            new_politico_nombre: solNewNombre.trim(),
+            new_politico_cargo: solNewCargo.trim(),
+            motivo: solMotivo.trim(),
+            estado: 'pendiente',
+            fecha_creacion: ahora
+          },
+          {
+            autor_nombre: currentUser.nombre_mostrar,
+            autor_rol: currentUser.rol,
+            ambito,
+            texto: `📋 [Solicitud] Solicito agregar a ${solNewNombre.trim()} (${solNewCargo.trim()}) en reemplazo de ${oldPol.nombre}. Motivo: ${solMotivo.trim()}`,
+            fecha_hora: ahora
+          }
+        );
+        setSolNewNombre('');
+        setSolNewCargo('');
+        setSolMotivo('');
+        setSolFeedback('✅ Solicitud guardada en Supabase y publicada en el chat interno.');
+        await fetchSolicitudes();
+        await fetchChat();
+        return;
+      }
       const res = await axios.post(`${API_URL}/solicitudes`, {
         autor_nombre: currentUser.nombre_mostrar,
         autor_rol: currentUser.rol,
@@ -447,8 +583,6 @@ function App() {
       await fetchSolicitudes();
       await fetchChat();
     } catch (error) {
-      const oldPol = politicos.find(p => p.id === solOldPoliticoId) || selectedPolitico;
-      const ahora = new Date().toLocaleString('es-AR', { hour12: false });
       const nuevaSol = {
         id: Date.now(),
         autor_nombre: currentUser.nombre_mostrar,
@@ -489,7 +623,20 @@ function App() {
     if (!isAdmin) return;
     setResolviendoId(solicitudId);
     const nota = notasAdmin[solicitudId] || '';
+    const sol = solicitudes.find(s => s.id === solicitudId);
     try {
+      if (isSupabaseConfigured() && sol) {
+        const nuevoPol = await sbResolveSolicitud(sol, accion, nota, currentUser.nombre_mostrar);
+        await fetchSolicitudes();
+        await fetchChat();
+        if (accion === 'aprobar') {
+          await fetchPoliticos(ambito);
+          if (nuevoPol && nuevoPol.ambito === ambito) {
+            setSelectedPolitico(nuevoPol);
+          }
+        }
+        return;
+      }
       const response = await axios.post(`${API_URL}/solicitudes/${solicitudId}/resolver`, {
         accion,
         nota_admin: nota,
@@ -505,7 +652,6 @@ function App() {
         }
       }
     } catch (error) {
-      const sol = solicitudes.find(s => s.id === solicitudId);
       if (sol) {
         const nuevoEstado = accion === 'aprobar' ? 'aprobada' : 'rechazada';
         const nextSols = solicitudes.map(s => s.id === solicitudId ? { ...s, estado: nuevoEstado, nota_admin: nota || (accion === 'aprobar' ? 'Aprobado y ejecutado.' : 'Rechazado.') } : s);
@@ -535,7 +681,20 @@ function App() {
   const handleEnviarMensajeChat = async (e) => {
     e.preventDefault();
     if (!nuevoMensajeChat.trim()) return;
+    const ahora = new Date().toLocaleString('es-AR', { hour12: false });
     try {
+      if (isSupabaseConfigured()) {
+        await sbCreateChat({
+          autor_nombre: currentUser.nombre_mostrar,
+          autor_rol: currentUser.rol,
+          ambito: ambito,
+          texto: nuevoMensajeChat.trim(),
+          fecha_hora: ahora
+        });
+        setNuevoMensajeChat('');
+        await fetchChat();
+        return;
+      }
       const res = await axios.post(`${API_URL}/chat`, {
         autor_nombre: currentUser.nombre_mostrar,
         autor_rol: currentUser.rol,
@@ -546,7 +705,6 @@ function App() {
       setNuevoMensajeChat('');
       await fetchChat();
     } catch (error) {
-      const ahora = new Date().toLocaleString('es-AR', { hour12: false });
       const nextChat = [...mensajesChat, {
         id: Date.now(),
         autor_nombre: currentUser.nombre_mostrar,
@@ -1264,44 +1422,89 @@ function App() {
             </div>
 
             {isAdmin && (
-              <form onSubmit={handleCrearUsuario} style={{ marginTop: '1.25rem', background: 'rgba(52, 211, 153, 0.06)', border: '1px solid rgba(52, 211, 153, 0.25)', borderRadius: '14px', padding: '1rem' }}>
-                <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: 'var(--primary-accent)' }}>
-                  ➕ Crear Credencial de Visualizador para Compañero
-                </h4>
-                <div className="form-group compact">
-                  <label>Nombre y Apellido del Compañero</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. Laura Gómez"
-                    value={nuevoUserNombre}
-                    onChange={(e) => setNuevoUserNombre(e.target.value)}
-                  />
-                </div>
-                <div className="form-row-2">
+              <>
+                <form onSubmit={handleCrearUsuario} style={{ marginTop: '1.25rem', background: 'rgba(52, 211, 153, 0.06)', border: '1px solid rgba(52, 211, 153, 0.25)', borderRadius: '14px', padding: '1rem' }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: 'var(--primary-accent)' }}>
+                    ➕ Crear Credencial de Visualizador para Compañero
+                  </h4>
                   <div className="form-group compact">
-                    <label>Usuario de Acceso</label>
+                    <label>Nombre y Apellido del Compañero</label>
                     <input
                       type="text"
-                      placeholder="Ej. lgomez"
-                      value={nuevoUserLogin}
-                      onChange={(e) => setNuevoUserLogin(e.target.value)}
+                      placeholder="Ej. Laura Gómez"
+                      value={nuevoUserNombre}
+                      onChange={(e) => setNuevoUserNombre(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-row-2">
+                    <div className="form-group compact">
+                      <label>Usuario de Acceso</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. lgomez"
+                        value={nuevoUserLogin}
+                        onChange={(e) => setNuevoUserLogin(e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group compact">
+                      <label>Contraseña Asignada</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. equipo2026"
+                        value={nuevoUserPass}
+                        onChange={(e) => setNuevoUserPass(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {userCreateMsg && <div className="request-feedback" style={{ marginBottom: '0.6rem' }}>{userCreateMsg}</div>}
+                  <button type="submit" className="btn-primary full-width" style={{ padding: '0.6rem 1rem', fontSize: '0.8rem' }}>
+                    Guardar Nueva Credencial
+                  </button>
+                </form>
+
+                <form onSubmit={handleGuardarSupabase} style={{ marginTop: '1rem', background: 'rgba(56, 189, 248, 0.06)', border: '1px solid rgba(56, 189, 248, 0.28)', borderRadius: '14px', padding: '1rem' }}>
+                  <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: '#38bdf8' }}>
+                    ☁️ Base de Datos Compartida Supabase 24/7 {sbConnected ? '— ACTIVA' : ''}
+                  </h4>
+                  <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Conecta tu proyecto de Supabase para sincronizar candidatos, chat, solicitudes y actualizaciones en tiempo real entre todos los dispositivos sin depender de Docker.
+                  </p>
+                  <div className="form-group compact">
+                    <label>Supabase Project URL</label>
+                    <input
+                      type="text"
+                      placeholder="https://tu-proyecto.supabase.co"
+                      value={sbUrlInput}
+                      onChange={(e) => setSbUrlInput(e.target.value)}
                     />
                   </div>
                   <div className="form-group compact">
-                    <label>Contraseña Asignada</label>
+                    <label>Supabase Anon Public Key</label>
                     <input
-                      type="text"
-                      placeholder="Ej. equipo2026"
-                      value={nuevoUserPass}
-                      onChange={(e) => setNuevoUserPass(e.target.value)}
+                      type="password"
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      value={sbKeyInput}
+                      onChange={(e) => setSbKeyInput(e.target.value)}
                     />
                   </div>
-                </div>
-                {userCreateMsg && <div className="request-feedback" style={{ marginBottom: '0.6rem' }}>{userCreateMsg}</div>}
-                <button type="submit" className="btn-primary full-width" style={{ padding: '0.6rem 1rem', fontSize: '0.8rem' }}>
-                  Guardar Nueva Credencial
-                </button>
-              </form>
+                  {sbStatusMsg && <div className="request-feedback" style={{ marginBottom: '0.6rem' }}>{sbStatusMsg}</div>}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button type="submit" className="btn-primary" style={{ flex: 1, padding: '0.6rem 0.9rem', fontSize: '0.78rem', justifyContent: 'center' }}>
+                      Conectar Supabase 24/7
+                    </button>
+                    {sbConnected && (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ flex: 1, padding: '0.6rem 0.9rem', fontSize: '0.78rem' }}
+                        onClick={handleCopiarLinkEquipoSupabase}
+                      >
+                        📋 Copiar Link de Equipo
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </>
             )}
 
             <form onSubmit={handleLoginSubmit} style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.1rem' }}>
