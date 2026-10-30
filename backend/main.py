@@ -205,6 +205,8 @@ def sincronizar_override_supabase(pol: Politico, menciones_generadas: list, delt
                 "id": int(datetime.now().timestamp() * 1000) + idx,
                 "sentimiento": m.get("sentimiento", "neu"),
                 "fuente": m.get("red") or m.get("fuente") or ("Prensa Nacional" if pol.ambito == "nacional" else "Prensa TDF"),
+                "fecha": m.get("fecha") or updated_at,
+                "url": m.get("url") or "",
                 "texto": m.get("texto", "")
             })
         payload = {
@@ -239,14 +241,16 @@ def guardar_datos_politico(db: Session, pol: Politico, usar_cv: bool = True, syn
     seed = scraper.hash_seed(f"{pol.id}{pol.nombre}")
     if sync_supabase:
         delta_pos, delta_neg = scraper.calcular_deltas_sentimiento(menciones_generadas, seed, count=1)
-        ahora_str = datetime.now().strftime("%H:%M")
+        ahora_str = datetime.now().strftime("%d/%m/%Y %H:%M hs")
         sincronizar_override_supabase(pol, menciones_generadas, delta_pos, delta_neg, ahora_str)
     elif override_actual and isinstance(override_actual.get("live_menciones"), list) and len(override_actual["live_menciones"]) > 0:
         menciones_generadas = [
             {
                 "texto": m.get("texto", ""),
                 "red": m.get("fuente", "Prensa"),
-                "sentimiento": m.get("sentimiento", "neu")
+                "sentimiento": m.get("sentimiento", "neu"),
+                "fecha": m.get("fecha", datetime.now().strftime("%d/%m/%Y %H:%M hs")),
+                "url": m.get("url", "")
             }
             for m in override_actual["live_menciones"]
             if m.get("texto")
@@ -268,7 +272,8 @@ def guardar_datos_politico(db: Session, pol: Politico, usar_cv: bool = True, syn
             fecha=date.today(),
             texto=m["texto"],
             sentimiento=m["sentimiento"],
-            fuente=m["red"]
+            fuente=m["red"],
+            url=m.get("url", "")
         ))
 
     for d_gen in debates_generados:

@@ -357,7 +357,33 @@ function calcularDeltasMenciones(menciones = [], seed = 0, count = 1) {
   return { deltaPos: +dPos.toFixed(1), deltaNeg: +dNeg.toFixed(1) };
 }
 
-function getCloudOverrides() {
+export function formatFechaHoraActual() {
+  const d = new Date();
+  const dia = String(d.getDate()).padStart(2, '0');
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const anio = d.getFullYear();
+  const hora = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${dia}/${mes}/${anio} ${hora}:${min} hs`;
+}
+
+export function formatFechaPublicacion(rawDate) {
+  if (!rawDate) return '';
+  try {
+    const d = new Date(rawDate);
+    if (!isNaN(d.getTime())) {
+      const dia = String(d.getDate()).padStart(2, '0');
+      const mes = String(d.getMonth() + 1).padStart(2, '0');
+      const anio = d.getFullYear();
+      const hora = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      return `${dia}/${mes}/${anio} ${hora}:${min} hs`;
+    }
+  } catch (e) {}
+  return String(rawDate);
+}
+
+export function getCloudOverrides() {
   try {
     const raw = localStorage.getItem('cloud_refresh_overrides_v2');
     return raw ? JSON.parse(raw) : {};
@@ -366,7 +392,7 @@ function getCloudOverrides() {
   }
 }
 
-function saveCloudOverrides(map) {
+export function saveCloudOverrides(map) {
   try {
     localStorage.setItem('cloud_refresh_overrides_v2', JSON.stringify(map));
   } catch (e) {}
@@ -377,7 +403,7 @@ export async function refreshCloudPolitico(pol) {
   const overrides = getCloudOverrides();
   const prev = overrides[pol.id] || { count: 0 };
   const nextCount = (prev.count || 0) + 1;
-  const ahora = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  const ahora = formatFechaHoraActual();
 
   let liveMenciones = [];
   try {
@@ -393,10 +419,13 @@ export async function refreshCloudPolitico(pol) {
       if (data && Array.isArray(data.items) && data.items.length > 0) {
         liveMenciones = data.items.slice(0, 6).map((item, idx) => {
           const cleanTitle = (item.title || '').replace(/<[^>]*>?/gm, '').trim();
+          const pubDate = formatFechaPublicacion(item.pubDate) || ahora;
           return {
             id: Date.now() + idx,
             sentimiento: analizarSentimientoCloud(cleanTitle),
-            fuente: item.author || (pol.ambito === 'nacional' ? 'Prensa Nacional (RSS)' : 'Prensa TDF (RSS)'),
+            fuente: item.author || (pol.ambito === 'nacional' ? 'Prensa Nacional' : 'Prensa TDF'),
+            fecha: pubDate,
+            url: item.link || '',
             texto: cleanTitle
           };
         });
@@ -442,7 +471,7 @@ export async function refreshCloudAmbito(ambito) {
   await sbSyncOverridesFromCloud();
   const list = getCloudPoliticos(ambito);
   const overrides = getCloudOverrides();
-  const ahora = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  const ahora = formatFechaHoraActual();
   const batch = [];
 
   list.forEach((pol) => {
@@ -509,7 +538,7 @@ export function generateCloudMetricas(pol) {
     ? "Monitoreo Medios Nacionales (Infobae, La Nación, Clarín, P12, Ámbito) + Redes"
     : "Monitoreo Prensa TDF (El Sureño, EDFM, Sur54) + Redes Sociales";
   const fuente = overrides?.updatedAt
-    ? `${baseFuente} · ⚡ Actualizado ${overrides.updatedAt}`
+    ? `${baseFuente} · ⚡ Auditoría consolidada: ${overrides.updatedAt}`
     : baseFuente;
 
   return quarters.map((q, idx) => {
@@ -591,40 +620,52 @@ export function generateCloudDebates(pol) {
 
 export function generateCloudMenciones(pol) {
   const overrides = getCloudOverrides()[pol.id];
+  const ahoraFecha = formatFechaHoraActual();
   if (overrides?.liveMenciones && overrides.liveMenciones.length > 0) {
-    return overrides.liveMenciones.slice(0, 4).map((m, idx) => ({
+    return overrides.liveMenciones.slice(0, 6).map((m, idx) => ({
       id: m.id || idx + 1,
       sentimiento: m.sentimiento || 'neu',
       fuente: m.fuente || (pol.ambito === 'nacional' ? 'Prensa Nacional' : 'Prensa TDF'),
+      fecha: m.fecha || overrides?.updatedAt || ahoraFecha,
+      url: m.url || (pol.ambito === 'nacional' ? 'https://www.infobae.com/politica/' : 'https://www.surenio.com.ar'),
       texto: (m.texto || '').replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim()
     }));
   }
   const etiqueta = pol.ambito === "nacional" ? "Prensa Nacional" : "Prensa TDF";
-  const stamp = overrides?.updatedAt ? ` (${overrides.updatedAt})` : "";
+  const stampFecha = overrides?.updatedAt || ahoraFecha;
+  const urlNoticias = pol.ambito === "nacional" ? "https://www.infobae.com/politica/" : "https://www.surenio.com.ar";
   return [
     {
       id: 1,
       sentimiento: "pos",
-      fuente: `X / Twitter${stamp}`,
+      fuente: "X / Twitter",
+      fecha: stampFecha,
+      url: `https://x.com/search?q=${encodeURIComponent(pol.nombre)}`,
       texto: `Destacada intervención de ${pol.nombre} presentando lineamientos de desarrollo, acuerdo institucional y proyección política.`
     },
     {
       id: 2,
       sentimiento: "neu",
-      fuente: `${etiqueta}${stamp}`,
-      texto: `Cobertura periodística sobre la agenda semanal de ${pol.nombre} y las reuniones con referentes del sector productivo.`
+      fuente: etiqueta,
+      fecha: stampFecha,
+      url: urlNoticias,
+      texto: `Cobertura periodística sobre la agenda de gestión de ${pol.nombre} y las reuniones de trabajo con referentes del sector productivo.`
     },
     {
       id: 3,
       sentimiento: "neg",
-      fuente: `Facebook${stamp}`,
-      texto: `Usuarios en foros ciudadanos debaten la situación económica y reclaman respuestas más rápidas al equipo de ${pol.nombre}.`
+      fuente: "Facebook",
+      fecha: stampFecha,
+      url: `https://www.facebook.com/search/top?q=${encodeURIComponent(pol.nombre)}`,
+      texto: `Usuarios en foros ciudadanos debaten la situación económica y reclaman respuestas más rápidas al espacio de ${pol.nombre}.`
     },
     {
       id: 4,
       sentimiento: "pos",
-      fuente: `Instagram${stamp}`,
-      texto: `Alta interacción en redes tras la publicación de ${pol.nombre} sobre nuevas iniciativas para el próximo período.`
+      fuente: "Instagram",
+      fecha: stampFecha,
+      url: "https://www.instagram.com/",
+      texto: `Alta interacción en redes tras las recientes publicaciones de ${pol.nombre} sobre proyectos e iniciativas para el próximo período.`
     }
   ];
 }

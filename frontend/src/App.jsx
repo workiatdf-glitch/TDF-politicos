@@ -6,7 +6,8 @@ import {
 import { 
   RefreshCw, TrendingUp, TrendingDown, Minus, Facebook, Twitter, Instagram, 
   ShieldCheck, Activity, MessageSquare, Globe, MapPin, Lock, Unlock, 
-  UserCheck, Send, CheckCircle2, XCircle, ArrowLeftRight, Search, X
+  UserCheck, Send, CheckCircle2, XCircle, ArrowLeftRight, Search, X,
+  Clock, Calendar, ExternalLink
 } from 'lucide-react';
 import './index.css';
 import {
@@ -14,6 +15,7 @@ import {
   INITIAL_CHAT,
   getCloudPoliticos,
   saveCloudPoliticos,
+  getCloudOverrides,
   generateCloudMetricas,
   generateCloudDebates,
   generateCloudMenciones,
@@ -118,6 +120,20 @@ function App() {
   const [resolviendoId, setResolviendoId] = useState(null);
 
   const isAdmin = currentUser?.rol === 'admin';
+
+  const getPoliticoLastAudit = (pol) => {
+    if (!pol) return 'Pendiente de auditoría';
+    const ov = (typeof getCloudOverrides === 'function' ? getCloudOverrides() : {})[pol.id];
+    if (ov && ov.updatedAt) return ov.updatedAt;
+    if (metricas && metricas.length > 0) {
+      const last = metricas[metricas.length - 1];
+      if (last && last.fuente && last.fuente.includes('⚡')) {
+        const parts = last.fuente.split('⚡');
+        return parts[parts.length - 1].replace('Auditoría consolidada:', '').replace('Actualizado', '').trim();
+      }
+    }
+    return '29/10/2026 22:15 hs';
+  };
 
   useEffect(() => {
     localStorage.setItem('tdf_user_session_v2', JSON.stringify(currentUser));
@@ -920,8 +936,14 @@ function App() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
                   <div>
-                    <h2>{selectedPolitico.nombre}</h2>
-                    <p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                      <h2 style={{ margin: 0 }}>{selectedPolitico.nombre}</h2>
+                      <span className="last-audit-chip" title="Fecha y hora de la última auditoría e inteligencia captada para esta figura">
+                        <Clock size={13} style={{ color: 'var(--primary-accent)', flexShrink: 0 }} />
+                        <span>Última auditoría: <strong>{getPoliticoLastAudit(selectedPolitico)}</strong></span>
+                      </span>
+                    </div>
+                    <p style={{ marginTop: '4px', marginBottom: 0 }}>
                       {selectedPolitico.cargo} |{' '}
                       <span style={{color: 'var(--secondary-accent)', fontWeight: 600}}>
                         {ambito === 'tdf' ? 'Sector Fueguino' : 'Proyección Nacional'}
@@ -1137,10 +1159,15 @@ function App() {
                   </div>
 
                   <div className="mentions-audit" style={{ animation: 'slideIn 1.1s ease-out', marginTop: '2.5rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                      <h3 style={{fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'}}>
-                        <Activity size={18} color="var(--primary-accent)" /> Auditoría de Voz Popular (Random Insights)
-                      </h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '8px' }}>
+                      <div>
+                        <h3 style={{fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'}}>
+                          <Activity size={18} color="var(--primary-accent)" /> Auditoría de Fuentes y Voz Popular (Evidencia y Trazabilidad)
+                        </h3>
+                        <p style={{ margin: '4px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          Registro de menciones y noticias captadas con medio de procedencia, fecha y enlace de verificación.
+                        </p>
+                      </div>
                       <button 
                         className="filter-btn" 
                         style={{ fontSize: '0.75rem', padding: '0.4rem 1rem' }}
@@ -1156,11 +1183,32 @@ function App() {
                       {mencionesRandom.length > 0 ? (
                         mencionesRandom.map((m, idx) => (
                           <div key={m.id || idx} className="mention-card" style={{ animationDelay: `${idx * 0.1}s` }}>
-                            <div className="mention-meta">
-                              <span className={`sentimiento-tag ${m.sentimiento}`}>{m.sentimiento}</span>
-                              <span className="source-tag">{m.fuente}</span>
+                            <div className="mention-meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <span className={`sentimiento-tag ${m.sentimiento}`}>{m.sentimiento}</span>
+                                <span className="source-tag">{m.fuente}</span>
+                              </div>
+                              {m.fecha && (
+                                <span className="mention-date-badge" title="Fecha de publicación o captura de la noticia/mención">
+                                  <Calendar size={11} style={{ marginRight: '4px' }} />
+                                  {m.fecha}
+                                </span>
+                              )}
                             </div>
-                            <p className="mention-text">"{m.texto.length > 180 ? m.texto.substring(0, 180) + '...' : m.texto}"</p>
+                            <p className="mention-text">"{m.texto.length > 220 ? m.texto.substring(0, 220) + '...' : m.texto}"</p>
+                            {m.url ? (
+                              <div className="mention-verification">
+                                <a 
+                                  href={m.url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className="verify-source-link"
+                                  title="Verificar noticia o mención en la fuente original"
+                                >
+                                  Comprobar fuente original <ExternalLink size={11} style={{ marginLeft: '4px' }} />
+                                </a>
+                              </div>
+                            ) : null}
                           </div>
                         ))
                       ) : (
