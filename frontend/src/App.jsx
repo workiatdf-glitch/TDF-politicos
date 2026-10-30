@@ -19,6 +19,7 @@ import {
   generateCloudMetricas,
   generateCloudDebates,
   generateCloudMenciones,
+  getVerificationUrl,
   refreshCloudPolitico,
   refreshCloudAmbito,
   getSupabaseConfig,
@@ -1196,19 +1197,22 @@ function App() {
                               )}
                             </div>
                             <p className="mention-text">"{m.texto.length > 220 ? m.texto.substring(0, 220) + '...' : m.texto}"</p>
-                            {m.url ? (
-                              <div className="mention-verification">
-                                <a 
-                                  href={m.url} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer" 
-                                  className="verify-source-link"
-                                  title="Verificar noticia o mención en la fuente original"
-                                >
-                                  Comprobar fuente original <ExternalLink size={11} style={{ marginLeft: '4px' }} />
-                                </a>
-                              </div>
-                            ) : null}
+                            {(() => {
+                              const targetUrl = getVerificationUrl(m.url, m.fuente, selectedPolitico?.nombre, m.texto);
+                              return targetUrl ? (
+                                <div className="mention-verification">
+                                  <a 
+                                    href={targetUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="verify-source-link"
+                                    title="Verificar noticia o mención en la fuente original"
+                                  >
+                                    Comprobar fuente original <ExternalLink size={11} style={{ marginLeft: '4px' }} />
+                                  </a>
+                                </div>
+                              ) : null;
+                            })()}
                           </div>
                         ))
                       ) : (

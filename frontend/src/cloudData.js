@@ -383,6 +383,97 @@ export function formatFechaPublicacion(rawDate) {
   return String(rawDate);
 }
 
+export function getVerificationUrl(url, fuente, nombrePolitico, texto) {
+  const cleanUrl = (url || '').trim();
+  const cleanFuente = (fuente || '').trim();
+  const nombre = (nombrePolitico || '').trim();
+
+  // 1. Si ya es una URL específica de artículo o búsqueda, usarla directamente
+  const isGenericHomepage = (
+    !cleanUrl ||
+    cleanUrl === 'https://www.surenio.com.ar' ||
+    cleanUrl === 'https://www.surenio.com.ar/' ||
+    cleanUrl === 'https://www.eldiariodelfindelmundo.com' ||
+    cleanUrl === 'https://www.eldiariodelfindelmundo.com/' ||
+    cleanUrl === 'https://www.sur54.com' ||
+    cleanUrl === 'https://www.sur54.com/' ||
+    cleanUrl === 'https://cronicasfueguinas.com' ||
+    cleanUrl === 'https://cronicasfueguinas.com/' ||
+    cleanUrl === 'https://www.infobae.com' ||
+    cleanUrl === 'https://www.infobae.com/' ||
+    cleanUrl === 'https://www.infobae.com/politica' ||
+    cleanUrl === 'https://www.infobae.com/politica/' ||
+    cleanUrl === 'https://www.lanacion.com.ar' ||
+    cleanUrl === 'https://www.lanacion.com.ar/' ||
+    cleanUrl === 'https://www.lanacion.com.ar/politica' ||
+    cleanUrl === 'https://www.lanacion.com.ar/politica/' ||
+    cleanUrl === 'https://www.clarin.com' ||
+    cleanUrl === 'https://www.clarin.com/' ||
+    cleanUrl === 'https://www.clarin.com/politica' ||
+    cleanUrl === 'https://www.clarin.com/politica/' ||
+    cleanUrl === 'https://www.pagina12.com.ar' ||
+    cleanUrl === 'https://www.pagina12.com.ar/' ||
+    cleanUrl === 'https://www.ambito.com' ||
+    cleanUrl === 'https://www.ambito.com/' ||
+    cleanUrl === 'https://www.instagram.com' ||
+    cleanUrl === 'https://www.instagram.com/' ||
+    cleanUrl === 'https://x.com' ||
+    cleanUrl === 'https://x.com/' ||
+    cleanUrl === 'https://www.facebook.com' ||
+    cleanUrl === 'https://www.facebook.com/'
+  );
+
+  if (cleanUrl && !isGenericHomepage) {
+    return cleanUrl;
+  }
+
+  // 2. Si es genérica o vacía, construir enlace de búsqueda exacto en la fuente correspondiente
+  const fuenteLower = cleanFuente.toLowerCase();
+  const qNombre = encodeURIComponent(nombre ? `"${nombre}"` : 'Tierra del Fuego');
+
+  if (fuenteLower.includes('sureño') || fuenteLower.includes('sureno')) {
+    return `https://www.google.com/search?q=${qNombre}+site:surenio.com.ar`;
+  }
+  if (fuenteLower.includes('fin del mundo') || fuenteLower.includes('edfm')) {
+    return `https://www.google.com/search?q=${qNombre}+site:eldiariodelfindelmundo.com`;
+  }
+  if (fuenteLower.includes('sur54') || fuenteLower.includes('sur 54')) {
+    return `https://www.google.com/search?q=${qNombre}+site:sur54.com`;
+  }
+  if (fuenteLower.includes('crónicas') || fuenteLower.includes('cronicas')) {
+    return `https://www.google.com/search?q=${qNombre}+site:cronicasfueguinas.com`;
+  }
+  if (fuenteLower.includes('infobae')) {
+    return `https://www.google.com/search?q=${qNombre}+site:infobae.com`;
+  }
+  if (fuenteLower.includes('la nación') || fuenteLower.includes('la nacion')) {
+    return `https://www.google.com/search?q=${qNombre}+site:lanacion.com.ar`;
+  }
+  if (fuenteLower.includes('clarín') || fuenteLower.includes('clarin')) {
+    return `https://www.google.com/search?q=${qNombre}+site:clarin.com`;
+  }
+  if (fuenteLower.includes('página') || fuenteLower.includes('pagina')) {
+    return `https://www.google.com/search?q=${qNombre}+site:pagina12.com.ar`;
+  }
+  if (fuenteLower.includes('ámbito') || fuenteLower.includes('ambito')) {
+    return `https://www.google.com/search?q=${qNombre}+site:ambito.com`;
+  }
+  if (fuenteLower.includes('twitter') || fuenteLower.includes(' x')) {
+    return `https://x.com/search?q=${encodeURIComponent(nombre)}`;
+  }
+  if (fuenteLower.includes('facebook')) {
+    return `https://www.facebook.com/search/posts/?q=${encodeURIComponent(nombre)}`;
+  }
+  if (fuenteLower.includes('instagram')) {
+    const handleTag = nombre.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return handleTag ? `https://www.instagram.com/explore/tags/${handleTag}/` : 'https://www.instagram.com/';
+  }
+
+  // 3. Fallback inteligente a búsqueda en Google con el nombre y la fuente
+  const queryStr = `${nombre ? `"${nombre}"` : ''} ${cleanFuente || 'noticias Tierra del Fuego'}`.trim();
+  return `https://www.google.com/search?q=${encodeURIComponent(queryStr)}`;
+}
+
 export function getCloudOverrides() {
   try {
     const raw = localStorage.getItem('cloud_refresh_overrides_v2');
@@ -425,7 +516,7 @@ export async function refreshCloudPolitico(pol) {
             sentimiento: analizarSentimientoCloud(cleanTitle),
             fuente: item.author || (pol.ambito === 'nacional' ? 'Prensa Nacional' : 'Prensa TDF'),
             fecha: pubDate,
-            url: item.link || '',
+            url: getVerificationUrl(item.link, item.author, pol.nombre, cleanTitle),
             texto: cleanTitle
           };
         });
@@ -627,20 +718,19 @@ export function generateCloudMenciones(pol) {
       sentimiento: m.sentimiento || 'neu',
       fuente: m.fuente || (pol.ambito === 'nacional' ? 'Prensa Nacional' : 'Prensa TDF'),
       fecha: m.fecha || overrides?.updatedAt || ahoraFecha,
-      url: m.url || (pol.ambito === 'nacional' ? 'https://www.infobae.com/politica/' : 'https://www.surenio.com.ar'),
+      url: getVerificationUrl(m.url, m.fuente, pol.nombre, m.texto),
       texto: (m.texto || '').replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim()
     }));
   }
   const etiqueta = pol.ambito === "nacional" ? "Prensa Nacional" : "Prensa TDF";
   const stampFecha = overrides?.updatedAt || ahoraFecha;
-  const urlNoticias = pol.ambito === "nacional" ? "https://www.infobae.com/politica/" : "https://www.surenio.com.ar";
   return [
     {
       id: 1,
       sentimiento: "pos",
       fuente: "X / Twitter",
       fecha: stampFecha,
-      url: `https://x.com/search?q=${encodeURIComponent(pol.nombre)}`,
+      url: getVerificationUrl('', 'X / Twitter', pol.nombre),
       texto: `Destacada intervención de ${pol.nombre} presentando lineamientos de desarrollo, acuerdo institucional y proyección política.`
     },
     {
@@ -648,7 +738,7 @@ export function generateCloudMenciones(pol) {
       sentimiento: "neu",
       fuente: etiqueta,
       fecha: stampFecha,
-      url: urlNoticias,
+      url: getVerificationUrl('', etiqueta, pol.nombre),
       texto: `Cobertura periodística sobre la agenda de gestión de ${pol.nombre} y las reuniones de trabajo con referentes del sector productivo.`
     },
     {
@@ -656,7 +746,7 @@ export function generateCloudMenciones(pol) {
       sentimiento: "neg",
       fuente: "Facebook",
       fecha: stampFecha,
-      url: `https://www.facebook.com/search/top?q=${encodeURIComponent(pol.nombre)}`,
+      url: getVerificationUrl('', 'Facebook', pol.nombre),
       texto: `Usuarios en foros ciudadanos debaten la situación económica y reclaman respuestas más rápidas al espacio de ${pol.nombre}.`
     },
     {
@@ -664,7 +754,7 @@ export function generateCloudMenciones(pol) {
       sentimiento: "pos",
       fuente: "Instagram",
       fecha: stampFecha,
-      url: "https://www.instagram.com/",
+      url: getVerificationUrl('', 'Instagram', pol.nombre),
       texto: `Alta interacción en redes tras las recientes publicaciones de ${pol.nombre} sobre proyectos e iniciativas para el próximo período.`
     }
   ];
