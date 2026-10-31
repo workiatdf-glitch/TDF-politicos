@@ -1232,7 +1232,7 @@ function App() {
                             </div>
                             <p className="mention-text">"{m.texto.length > 220 ? m.texto.substring(0, 220) + '...' : m.texto}"</p>
                             {(() => {
-                              const targetUrl = getVerificationUrl(m.url, m.fuente, selectedPolitico?.nombre, m.texto);
+                              const targetUrl = getVerificationUrl(m.url, m.fuente, selectedPolitico?.nombre, m.texto, selectedPolitico);
                               return targetUrl ? (
                                 <div className="mention-verification">
                                   <a 

@@ -383,10 +383,151 @@ export function formatFechaPublicacion(rawDate) {
   return String(rawDate);
 }
 
-export function getVerificationUrl(url, fuente, nombrePolitico, texto) {
+export function cleanPoliticoName(nombre = '') {
+  let n = (nombre || '').trim();
+  // Quitar títulos profesionales y honoríficos que ensucian los buscadores
+  n = n.replace(/^(dr\.|dra\.|lic\.|ing\.|prof\.|cr\.|cra\.|cdor\.|cdora\.|abg\.|abog\.)\s+/i, '');
+  // Quitar paréntesis explicativos
+  n = n.replace(/\s*\([^)]*\)/g, '');
+  return n.trim();
+}
+
+export function getShortPoliticoName(nombre = '') {
+  const clean = cleanPoliticoName(nombre);
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length >= 3) {
+    // Ej. "Javier Andrés Barrios" -> "Javier Barrios"
+    return `${parts[0]} ${parts[parts.length - 1]}`;
+  }
+  return clean;
+}
+
+export const POLITICO_HANDLES = {
+  barrios: { x: 'BarriosJavierAR', ig: 'drjavierbarrios' },
+  melella: { x: 'gustavomelella', ig: 'gustavomelella', fb: 'gustavomelella' },
+  vuoto: { x: 'WalterVuotoTDF', ig: 'waltervuototdf', fb: 'WalterVuoto' },
+  perez: { x: 'MartinPerezTDF', ig: 'martinpereztdf', fb: 'MartinPerezRG' },
+  harrington: { x: 'dharrington_tdf', ig: 'danielharringtontolhuin' },
+  urquiza: { x: 'monica_urquiza', ig: 'monicaurquizatdf', fb: 'MonicaUrquizaTDF' },
+  greve: { x: 'FedericoGreve', ig: 'federicogreve' },
+  lechman: { x: 'JorgeLechman', ig: 'jorgelechman' },
+  pino: { x: 'JuanCarlosPinoOK', ig: 'juancarlospinook' },
+  tita: { x: 'AgustinTita', ig: 'agustintita' },
+  vonderthusen: { x: 'vonderthusenr', ig: 'raulvonderthusen' },
+  sciurano: { x: 'fsciurano', ig: 'federicosciurano' },
+  lores: { x: 'DamianLoffler', ig: 'damianloffler' },
+  martinez_m: { x: 'MyriamMartinezTF', ig: 'myriammartineztdf' },
+  colazo: { x: 'LauraColazoTDF', ig: 'lauracolazotdf' },
+  vvuoto: { x: 'VictoriaVuoto', ig: 'victoriavuototdf' },
+  runin: { x: 'FedericoRunin', ig: 'federicorunin' },
+  castillo: { x: 'GabrielaCastilloTF', ig: 'gabrielacastillotdf' },
+  digiglio: { x: 'JuditDiGiglio', ig: 'juditdigiglio' },
+  rossi: { x: 'LuciaRossiTDF', ig: 'luciarossitdf' },
+  coto: { x: 'agustincoto', ig: 'agustincoto' },
+  graciania: { x: 'NGraciania', ig: 'nataliagraciania' },
+  catena: { x: 'HoracioCatena', ig: 'horaciocatenasutef' },
+  vergara: { x: 'ReneVergaraTDF' },
+  fernandez: { x: 'ClaudiaFernandezUsh' },
+  guglielmi: { x: 'LucianaGuglielmi' },
+  gliubich: { x: 'FernandoGliubich', ig: 'fernandogliubich' },
+  worman: { x: 'GuillermoWorman', ig: 'guillermoworman' },
+  cordoba: { x: 'MarceloCordobaATE' },
+  etchepare: { x: 'ClaudiaEtchepare' },
+  martinez_o: { x: 'OscarMartinezUOM' },
+  // Nacionales
+  milei: { x: 'JMilei', ig: 'javiermilei' },
+  cfk: { x: 'CFKArgentina', ig: 'cristinafkirchner' },
+  kicillof: { x: 'Kicillofok', ig: 'akicillof' },
+  macri: { x: 'mauriciomacri', ig: 'mauriciomacri' },
+  villarruel: { x: 'VickyVillarruel', ig: 'victoria.villarruel' },
+  bullrich: { x: 'PatoBullrich', ig: 'patobullrich' },
+  caputo: { x: 'LuisCaputoAR', ig: 'luiscaputo' },
+  massa: { x: 'SergioMassa', ig: 'sergiomassaok' },
+  francos: { x: 'GAFrancosOk' },
+  pichetto: { x: 'MiguelPichetto' },
+  lousteau: { x: 'GugaLoustau', ig: 'gugaloustau' },
+  llaryora: { x: 'MartinLlaryora', ig: 'martinllaryora' },
+  pullaro: { x: 'maxipullaro', ig: 'maxipullaro' },
+  torres: { x: 'NachoTorresCH', ig: 'nachotorresch' },
+  menem_m: { x: 'MenemMartin', ig: 'menemmartin' },
+  bregman: { x: 'myriambregman', ig: 'myriambregman' }
+};
+
+export function getPoliticoContextAnchor(pol) {
+  if (!pol) return 'Tierra del Fuego';
+  const cargoLower = (pol.cargo || '').toLowerCase();
+  const nombreLower = (pol.nombre || '').toLowerCase();
+  if (pol.ambito === 'nacional') {
+    return 'Argentina';
+  }
+  let theme = '';
+  if (cargoLower.includes('salud') || cargoLower.includes('sanitari') || nombreLower.includes('barrios') || nombreLower.includes('giglio') || nombreLower.includes('etchepare')) {
+    theme = 'OR Salud OR Hospital OR OSEF';
+  } else if (cargoLower.includes('intendente') || cargoLower.includes('concejal')) {
+    theme = 'OR Municipio OR Obras';
+  } else if (cargoLower.includes('legislador') || cargoLower.includes('diputad')) {
+    theme = 'OR Legislatura OR Bloque';
+  } else if (cargoLower.includes('sutef') || cargoLower.includes('ate') || cargoLower.includes('uom') || cargoLower.includes('gremial')) {
+    theme = 'OR Gremio OR Paritaria OR Fabrica';
+  }
+  return `("Tierra del Fuego" OR Ushuaia OR "Rio Grande" OR TDF ${theme})`.trim();
+}
+
+export function getSocialVerificationUrl(red = '', polOrNombre = '') {
+  const r = (red || '').toLowerCase();
+  let pol = typeof polOrNombre === 'object' && polOrNombre !== null ? polOrNombre : null;
+  if (!pol && typeof polOrNombre === 'string') {
+    pol = INITIAL_POLITICOS.find(p => p.nombre.toLowerCase() === polOrNombre.toLowerCase() || p.id === polOrNombre) || {
+      nombre: polOrNombre,
+      ambito: 'tdf'
+    };
+  }
+  const clean = cleanPoliticoName(pol?.nombre || String(polOrNombre));
+  const short = getShortPoliticoName(clean);
+  const handleData = pol?.id ? POLITICO_HANDLES[pol.id] : null;
+  const anchor = getPoliticoContextAnchor(pol);
+
+  if (r.includes('twitter') || r.includes(' x')) {
+    const handle = handleData?.x;
+    const namePart = (clean !== short)
+      ? `("${clean}" OR "${short}")`
+      : `"${clean}"`;
+
+    let query = '';
+    if (handle) {
+      query = `to:${handle} OR @${handle} OR (${namePart} ${anchor})`;
+    } else {
+      query = `${namePart} ${anchor}`;
+    }
+    return `https://x.com/search?q=${encodeURIComponent(query)}&f=live`;
+  }
+
+  if (r.includes('facebook')) {
+    const fbGeo = pol?.ambito === 'nacional' ? 'Argentina' : '"Tierra del Fuego"';
+    return `https://www.facebook.com/search/posts/?q=${encodeURIComponent(`"${clean}" ${fbGeo}`)}`;
+  }
+
+  if (r.includes('instagram')) {
+    if (handleData?.ig) {
+      return `https://www.instagram.com/${handleData.ig}/`;
+    }
+    const handleTag = short.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return handleTag ? `https://www.instagram.com/explore/tags/${handleTag}/` : 'https://www.instagram.com/';
+  }
+
+  if (r.includes('youtube')) {
+    const ytGeo = pol?.ambito === 'nacional' ? 'Argentina' : 'Tierra del Fuego';
+    return `https://www.youtube.com/results?search_query=${encodeURIComponent(`"${clean}" ${ytGeo}`)}`;
+  }
+
+  return `https://www.google.com/search?q=${encodeURIComponent(`"${clean}" ${anchor}`)}`;
+}
+
+export function getVerificationUrl(url, fuente, nombrePolitico, texto, polObj) {
   const cleanUrl = (url || '').trim();
   const cleanFuente = (fuente || '').trim();
-  const nombre = (nombrePolitico || '').trim();
+  const cleanName = cleanPoliticoName(nombrePolitico || '');
+  const shortName = getShortPoliticoName(cleanName);
 
   // 1. Si ya es una URL específica de artículo o búsqueda, usarla directamente
   const isGenericHomepage = (
@@ -429,7 +570,7 @@ export function getVerificationUrl(url, fuente, nombrePolitico, texto) {
 
   // 2. Si es genérica o vacía, construir enlace de búsqueda exacto en la fuente correspondiente
   const fuenteLower = cleanFuente.toLowerCase();
-  const qNombre = encodeURIComponent(nombre ? `"${nombre}"` : 'Tierra del Fuego');
+  const qNombre = encodeURIComponent(cleanName ? `"${cleanName}"` : 'Tierra del Fuego');
 
   if (fuenteLower.includes('sureño') || fuenteLower.includes('sureno')) {
     return `https://www.google.com/search?q=${qNombre}+site:surenio.com.ar`;
@@ -459,18 +600,17 @@ export function getVerificationUrl(url, fuente, nombrePolitico, texto) {
     return `https://www.google.com/search?q=${qNombre}+site:ambito.com`;
   }
   if (fuenteLower.includes('twitter') || fuenteLower.includes(' x')) {
-    return `https://x.com/search?q=${encodeURIComponent(nombre)}`;
+    return getSocialVerificationUrl('x', polObj || cleanName);
   }
   if (fuenteLower.includes('facebook')) {
-    return `https://www.facebook.com/search/posts/?q=${encodeURIComponent(nombre)}`;
+    return getSocialVerificationUrl('facebook', polObj || cleanName);
   }
   if (fuenteLower.includes('instagram')) {
-    const handleTag = nombre.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return handleTag ? `https://www.instagram.com/explore/tags/${handleTag}/` : 'https://www.instagram.com/';
+    return getSocialVerificationUrl('instagram', polObj || cleanName);
   }
 
-  // 3. Fallback inteligente a búsqueda en Google con el nombre y la fuente
-  const queryStr = `${nombre ? `"${nombre}"` : ''} ${cleanFuente || 'noticias Tierra del Fuego'}`.trim();
+  // 3. Fallback inteligente a búsqueda en Google con el nombre exacto entre comillas y anclaje
+  const queryStr = `"${cleanName}" ("Tierra del Fuego" OR Ushuaia OR "Rio Grande") ${cleanFuente || ''}`.trim();
   return `https://www.google.com/search?q=${encodeURIComponent(queryStr)}`;
 }
 
@@ -707,25 +847,6 @@ export function generateCloudDebates(pol) {
       ]
     }
   ];
-}
-
-export function getSocialVerificationUrl(red = '', nombre = '') {
-  const r = red.toLowerCase();
-  const q = encodeURIComponent(nombre.trim());
-  if (r.includes('twitter') || r.includes(' x')) {
-    return `https://x.com/search?q=${q}`;
-  }
-  if (r.includes('facebook')) {
-    return `https://www.facebook.com/search/posts/?q=${q}`;
-  }
-  if (r.includes('instagram')) {
-    const handleTag = nombre.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return handleTag ? `https://www.instagram.com/explore/tags/${handleTag}/` : 'https://www.instagram.com/';
-  }
-  if (r.includes('youtube')) {
-    return `https://www.youtube.com/results?search_query=${q}`;
-  }
-  return `https://www.google.com/search?q=${q}+redes+sociales`;
 }
 
 export function generateCloudSocialComments(pol) {
@@ -975,7 +1096,7 @@ export function generateCloudSocialComments(pol) {
     fecha: t.fecha,
     sentimiento: t.sentimiento,
     texto: t.texto,
-    url: getSocialVerificationUrl(t.red, pol.nombre)
+    url: getSocialVerificationUrl(t.red, pol)
   }));
 }
 

@@ -90,17 +90,101 @@ def formatear_fecha_rss(entry, default_str=""):
         return str(pub)[:22]
     return default_str or datetime.now().strftime("%d/%m/%Y %H:%M hs")
 
-def make_google_search_url(nombre: str, site: str = "") -> str:
-    query = f'"{nombre}" site:{site}' if site else f'"{nombre}"'
+def clean_politico_name(nombre: str) -> str:
+    n = (nombre or "").strip()
+    n = re.sub(r'^(dr\.|dra\.|lic\.|ing\.|prof\.|cr\.|cra\.|cdor\.|cdora\.|abg\.|abog\.)\s+', '', n, flags=re.IGNORECASE)
+    n = re.sub(r'\s*\([^)]*\)', '', n)
+    return n.strip()
+
+def get_short_politico_name(clean_name: str) -> str:
+    parts = clean_name.split()
+    if len(parts) >= 3:
+        return f"{parts[0]} {parts[-1]}"
+    return clean_name
+
+def get_politico_context_anchor(nombre: str, cargo: str = "", ambito: str = "tdf") -> str:
+    if ambito == "nacional":
+        return '("Argentina")'
+    cargo_low = (cargo or "").lower()
+    nombre_low = (nombre or "").lower()
+    theme = ""
+    if any(k in cargo_low or k in nombre_low for k in ['salud', 'sanitari', 'barrios', 'giglio', 'etchepare']):
+        theme = 'OR Salud OR Hospital OR OSEF'
+    elif any(k in cargo_low for k in ['intendente', 'concejal']):
+        theme = 'OR Municipio OR Obras'
+    elif any(k in cargo_low for k in ['legislador', 'diputad', 'senador']):
+        theme = 'OR Legislatura OR Bloque'
+    elif any(k in cargo_low or k in nombre_low for k in ['sutef', 'ate', 'uom', 'gremial', 'catena', 'cordoba', 'vergara']):
+        theme = 'OR Gremio OR Paritaria OR Fabrica'
+    return f'("Tierra del Fuego" OR Ushuaia OR "Rio Grande" OR TDF {theme})'.strip()
+
+def make_google_search_url(nombre: str, site: str = "", anchor: str = "") -> str:
+    clean = clean_politico_name(nombre)
+    if site:
+        query = f'"{clean}" site:{site}'
+    else:
+        geo = '("Tierra del Fuego" OR Ushuaia OR "Rio Grande")' if ("Tierra del Fuego" in anchor or "Ushuaia" in anchor) else 'Argentina'
+        query = f'"{clean}" {geo}'
     return "https://www.google.com/search?q=" + urllib.parse.quote(query)
 
-def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf"):
+def es_mencion_valida(texto_item: str, fuente: str, clean_name: str, short_name: str, ambito: str, cargo: str = "") -> bool:
+    t = texto_item.lower()
+    f = (fuente or "").lower()
+    c_low = clean_name.lower()
+    s_low = short_name.lower()
+    
+    # Descartar fuentes o locaciones extranjeras evidentes
+    if any(loc in t or loc in f for loc in ['españa', 'castilla', 'vigo', 'écija', 'ecija', 'cuenca', 'montevideo', 'uruguay', 'chile', 'méxico', 'mexico', 'colombia', 'perú', 'peru', 'guatemala', 'escuintla']):
+        return False
+    
+    # Comprobar si coincide nombre completo o versión corta
+    has_name = (c_low in t or s_low in t)
+    
+    parts = clean_name.split()
+    first_name = parts[0].lower() if parts else ""
+    last_name = parts[-1].lower() if len(parts) > 1 else first_name
+
+    # Si no tiene el nombre exacto, verificar si tiene apellido + primer nombre
+    if not has_name and last_name and len(last_name) >= 3 and last_name in t:
+        if last_name == 'barrios':
+            # Evitar "en los barrios", "distintos barrios"
+            if re.search(r'\b(en los|los|sus|varios|distintos|diferentes|todos los|obras en)\s+barrios\b', t):
+                return False
+        if first_name and first_name in t:
+            has_name = True
+            
+    if not has_name:
+        return False
+
+    # Para TDF: DEBE tener anclaje territorial o institucional fueguino
+    if ambito == 'tdf':
+        anchors_tdf = [
+            'tierra del fuego', 'ushuaia', 'río grande', 'rio grande', 'tolhuin', 
+            'tdf', 'fueguino', 'fueguina', 'osef', 'melella', 'vuoto', 'perez',
+            'legislatura', 'concejo', 'hospital regional'
+        ]
+        cargo_low = (cargo or "").lower()
+        if any(k in cargo_low or k in clean_name.lower() for k in ['salud', 'médic', 'sanitar', 'barrios', 'giglio', 'etchepare']):
+            anchors_tdf.extend(['salud', 'hospital', 'sanitari', 'sanitaria', 'clínica', 'clinica', 'asistencia médica', 'vacunación', 'vacunacion', 'covid'])
+        elif any(k in cargo_low for k in ['sutef', 'ate', 'uom', 'gremio', 'docente']):
+            anchors_tdf.extend(['gremio', 'sindicato', 'paritaria', 'docentes', 'fabrica', 'uom', 'sutef', 'ate'])
+
+        return any(a in t or a in f for a in anchors_tdf)
+
+    return True
+
+def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf", cargo: str = ""):
     """
-    Lee desde feeds RSS locales de Tierra del Fuego o medios Nacionales según el ámbito.
-    Retorna objetos con texto, fuente específica, url de la nota y fecha de publicación.
+    Lee desde Google News RSS y feeds locales de Tierra del Fuego o medios Nacionales
+    según el ámbito, con limpieza de títulos profesionales, consultas booleanas
+    y desambiguación estricta anti-homónimos.
     """
     resultados = []
     
+    clean_name = clean_politico_name(nombre_politico)
+    short_name = get_short_politico_name(clean_name)
+    anchor = get_politico_context_anchor(clean_name, cargo, ambito)
+
     feeds_tdf = [
         {"url": "https://www.surenio.com.ar/feed/", "nombre": "El Sureño", "base_url": "https://www.surenio.com.ar"},
         {"url": "https://cronicasfueguinas.com/feeds/posts/default?alt=rss", "nombre": "Crónicas Fueguinas", "base_url": "https://cronicasfueguinas.com"},
@@ -121,11 +205,13 @@ def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf"):
     hoy_str = datetime.now().strftime("%d/%m/%Y")
     textos_vistos = set()
 
-    # 1. Búsqueda directa en Google News RSS para el referente específico
+    # 1. Búsqueda directa en Google News RSS con anclaje booleano y nombre exacto
     import urllib.parse
     import urllib.request
     import xml.etree.ElementTree as ET
-    query_term = f'"{nombre_politico}" Tierra del Fuego' if ambito == "tdf" else f'"{nombre_politico}" Argentina'
+    
+    name_term = f'("{clean_name}" OR "{short_name}")' if clean_name != short_name else f'"{clean_name}"'
+    query_term = f'{name_term} {anchor}'
     gnews_url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_term)}&hl=es-419&gl=AR&ceid=AR:es-419"
     try:
         req = urllib.request.Request(gnews_url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
@@ -138,6 +224,11 @@ def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf"):
                 p = it.find("pubDate").text if it.find("pubDate") is not None else ""
                 s = it.find("source").text if it.find("source") is not None else ("Prensa TDF" if ambito == "tdf" else "Prensa Nacional")
                 t_clean = limpiar_html_texto(t)
+                
+                # Validación estricta anti-homónimos
+                if not es_mencion_valida(t_clean, s, clean_name, short_name, ambito, cargo):
+                    continue
+
                 if t_clean and t_clean not in textos_vistos:
                     textos_vistos.add(t_clean)
                     fecha_pub = p
@@ -151,17 +242,15 @@ def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf"):
                     resultados.append({
                         "texto": t_clean,
                         "fuente": s or ("Prensa TDF" if ambito == "tdf" else "Prensa Nacional"),
-                        "url": l or make_google_search_url(nombre_politico),
+                        "url": l or make_google_search_url(clean_name, anchor=anchor),
                         "fecha": fecha_pub or f"{hoy_str} 10:00 hs"
                     })
     except Exception as e:
-        print(f"Error extrayendo Google News RSS para {nombre_politico}: {e}")
+        print(f"Error extrayendo Google News RSS para {clean_name}: {e}")
 
-    # 2. Complementar con feeds locales/nacionales si faltan resultados
+    # 2. Complementar con feeds locales/nacionales si faltan resultados (con filtro estricto)
     if len(resultados) < 4:
         import feedparser
-        nombre_lower = nombre_politico.lower()
-        apellido = nombre_politico.split()[-1].lower() if len(nombre_politico.split()) > 1 else nombre_lower
         for f_info in feeds:
             try:
                 d = feedparser.parse(f_info["url"])
@@ -170,12 +259,11 @@ def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf"):
                     resumen = limpiar_html_texto(entry.get("summary", ""))
                     texto = f"{titulo}. {resumen}".strip(". ") if resumen and resumen not in titulo else titulo
                     texto = limpiar_html_texto(texto)
-                    texto_lower = texto.lower()
-                    if texto and (nombre_lower in texto_lower or apellido in texto_lower):
+                    if texto and es_mencion_valida(texto, f_info["nombre"], clean_name, short_name, ambito, cargo):
                         if texto not in textos_vistos:
                             textos_vistos.add(texto)
                             site_domain = urllib.parse.urlparse(f_info["base_url"]).netloc
-                            link = entry.get("link") or make_google_search_url(nombre_politico, site_domain)
+                            link = entry.get("link") or make_google_search_url(clean_name, site_domain, anchor)
                             fecha_pub = formatear_fecha_rss(entry, default_str=f"{hoy_str} 10:00 hs")
                             resultados.append({
                                 "texto": texto,
@@ -184,44 +272,42 @@ def buscar_noticias_reales(nombre_politico: str, ambito: str = "tdf"):
                                 "fecha": fecha_pub
                             })
             except Exception as e:
-                print(f"Error extrayendo RSS para {nombre_politico} en {f_info['url']}: {e}")
+                print(f"Error extrayendo RSS para {clean_name} en {f_info['url']}: {e}")
 
-    # 3. Fallback inteligente con enlaces de búsqueda verificables y redacción neutra
+    # 3. Fallback inteligente de alta precisión con enlaces de búsqueda verificables
     if len(resultados) == 0:
         if ambito == "nacional":
             resultados.append({
-                "texto": f"Análisis y coberturas en medios nacionales sobre el posicionamiento de {nombre_politico} de cara al escenario legislativo y acuerdos políticos.",
+                "texto": f"Análisis y coberturas en medios nacionales sobre el posicionamiento de {clean_name} de cara al escenario legislativo y acuerdos políticos.",
                 "fuente": "Infobae",
-                "url": make_google_search_url(nombre_politico, "infobae.com"),
+                "url": make_google_search_url(clean_name, "infobae.com", anchor),
                 "fecha": f"{hoy_str} 09:30 hs"
             })
             resultados.append({
-                "texto": f"Debate en prensa sobre las definiciones económicas y la gobernabilidad parlamentaria vinculada al espacio de {nombre_politico}.",
+                "texto": f"Debate en prensa sobre las definiciones económicas y la gobernabilidad parlamentaria vinculada al espacio de {clean_name}.",
                 "fuente": "La Nación",
-                "url": make_google_search_url(nombre_politico, "lanacion.com.ar"),
+                "url": make_google_search_url(clean_name, "lanacion.com.ar", anchor),
                 "fecha": f"{hoy_str} 12:15 hs"
             })
             resultados.append({
-                "texto": f"Repercusiones en columnas de análisis político acerca del impacto federal de las declaraciones de {nombre_politico}.",
+                "texto": f"Repercusiones en columnas de análisis político acerca del impacto federal de las declaraciones de {clean_name}.",
                 "fuente": "Clarín",
-                "url": make_google_search_url(nombre_politico, "clarin.com"),
+                "url": make_google_search_url(clean_name, "clarin.com", anchor),
                 "fecha": f"{hoy_str} 15:45 hs"
             })
         else:
             resultados.append({
-                "texto": f"Declaraciones e iniciativas de {nombre_politico} en materia de desarrollo productivo e infraestructura para Tierra del Fuego.",
+                "texto": f"Declaraciones e iniciativas de {clean_name} en materia de gestión pública y desarrollo para Tierra del Fuego.",
                 "fuente": "El Sureño",
-                "url": make_google_search_url(nombre_politico, "surenio.com.ar"),
+                "url": make_google_search_url(clean_name, "surenio.com.ar", anchor),
                 "fecha": f"{hoy_str} 10:20 hs"
             })
             resultados.append({
-                "texto": f"Cobertura en medios de Ushuaia, Río Grande y Tolhuin sobre las gestiones y proyectos impulsados por {nombre_politico}.",
+                "texto": f"Cobertura en medios de Ushuaia, Río Grande y Tolhuin sobre las gestiones y proyectos impulsados en el ámbito de {clean_name}.",
                 "fuente": "Diario del Fin del Mundo",
-                "url": make_google_search_url(nombre_politico, "eldiariodelfindelmundo.com"),
+                "url": make_google_search_url(clean_name, "eldiariodelfindelmundo.com", anchor),
                 "fecha": f"{hoy_str} 14:10 hs"
             })
-
-    return resultados
 
     return resultados
 
