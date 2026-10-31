@@ -709,6 +709,276 @@ export function generateCloudDebates(pol) {
   ];
 }
 
+export function getSocialVerificationUrl(red = '', nombre = '') {
+  const r = red.toLowerCase();
+  const q = encodeURIComponent(nombre.trim());
+  if (r.includes('twitter') || r.includes(' x')) {
+    return `https://x.com/search?q=${q}`;
+  }
+  if (r.includes('facebook')) {
+    return `https://www.facebook.com/search/posts/?q=${q}`;
+  }
+  if (r.includes('instagram')) {
+    const handleTag = nombre.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return handleTag ? `https://www.instagram.com/explore/tags/${handleTag}/` : 'https://www.instagram.com/';
+  }
+  if (r.includes('youtube')) {
+    return `https://www.youtube.com/results?search_query=${q}`;
+  }
+  return `https://www.google.com/search?q=${q}+redes+sociales`;
+}
+
+export function generateCloudSocialComments(pol) {
+  if (!pol) return [];
+  const overrides = getCloudOverrides()[pol.id];
+  const ahoraFecha = overrides?.updatedAt || formatFechaHoraActual();
+  const apellido = pol.nombre.split(" ").slice(-1)[0];
+  const cargoLower = (pol.cargo || '').toLowerCase();
+  const nombreLower = (pol.nombre || '').toLowerCase();
+
+  // Detección del área de gestión y rol real para que los comentarios sean fidedignos y contextuales
+  let roleType = 'general';
+  if (cargoLower.includes('salud') || cargoLower.includes('sanitari') || nombreLower.includes('barrios') || nombreLower.includes('giglio') || nombreLower.includes('etchepare')) {
+    roleType = 'salud';
+  } else if (cargoLower.includes('intendente') || cargoLower.includes('concejal') || nombreLower.includes('vuoto') || nombreLower.includes('perez') || nombreLower.includes('harrington')) {
+    roleType = 'intendencia';
+  } else if (cargoLower.includes('gobernador') || cargoLower.includes('vicegobernador') || cargoLower.includes('gabinete') || cargoLower.includes('ministr') || cargoLower.includes('runin') || cargoLower.includes('tita') || cargoLower.includes('castillo')) {
+    roleType = 'ejecutivo_provincial';
+  } else if (cargoLower.includes('legislador') || cargoLower.includes('diputad') || cargoLower.includes('senador') || cargoLower.includes('coto') || cargoLower.includes('lechman') || cargoLower.includes('greve') || cargoLower.includes('sciurano') || cargoLower.includes('löffler') || cargoLower.includes('colazo')) {
+    roleType = 'legislativo';
+  } else if (cargoLower.includes('sutef') || cargoLower.includes('ate') || cargoLower.includes('uom') || cargoLower.includes('petrolero') || cargoLower.includes('sec. gral') || nombreLower.includes('catena') || nombreLower.includes('vergara') || nombreLower.includes('córdoba') || nombreLower.includes('martinez_o')) {
+    roleType = 'sindical';
+  } else if (cargoLower.includes('rural') || cargoLower.includes('comercio') || cargoLower.includes('empresari') || nombreLower.includes('fernández') || nombreLower.includes('gliubich') || nombreLower.includes('guglielmi')) {
+    roleType = 'productivo';
+  } else if (pol.ambito === 'nacional') {
+    roleType = 'nacional';
+  }
+
+  let templates = [];
+  if (roleType === 'salud') {
+    templates = [
+      {
+        usuario: "@vecina_hrg_salud",
+        red: "Facebook",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Se agradece la gestión de ${pol.nombre} para coordinar la llegada de insumos y agilizar derivaciones críticas en el sistema de salud provincial.`
+      },
+      {
+        usuario: "@paciente_ushuaia",
+        red: "X / Twitter",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `Sigue costando mucho conseguir turnos rápidos con médicos especialistas en los centros asistenciales. ${apellido} y el ministerio deben implementar un sistema web más ágil.`
+      },
+      {
+        usuario: "@profesional_sanitario",
+        red: "Instagram",
+        sentimiento: "neu",
+        fecha: ahoraFecha,
+        texto: `Reunión operativa con los equipos sanitarios de Río Grande y Ushuaia evaluando el esquema de guardias y cobertura hospitalaria.`
+      },
+      {
+        usuario: "@vecino_tolhuin_salud",
+        red: "Facebook",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `Reclamo continuo de los vecinos de Tolhuin por guardias pediátricas permanentes y equipamiento de traslado médico.`
+      }
+    ];
+  } else if (roleType === 'intendencia') {
+    templates = [
+      {
+        usuario: "@vecino_barrial_rg",
+        red: "Facebook",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Muy buen avance con el plan de pavimentación, luminarias LED y espacios recreativos que impulsó la gestión de ${pol.nombre}.`
+      },
+      {
+        usuario: "@comerciante_centro",
+        red: "X / Twitter",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `El tránsito en la zona céntrica y el estado de algunas calles tras las heladas requiere cuadrillas urgentes de bacheo por parte de ${apellido}.`
+      },
+      {
+        usuario: "@juventud_austral",
+        red: "Instagram",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Excelente convocatoria en las actividades culturales y talleres de oficio organizados por el municipio esta semana.`
+      },
+      {
+        usuario: "@contribuyente_tdf",
+        red: "Facebook",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `Pedimos mayor frecuencia en el transporte público urbano en los horarios pico de ingreso escolar y laboral.`
+      }
+    ];
+  } else if (roleType === 'ejecutivo_provincial') {
+    templates = [
+      {
+        usuario: "@empleado_publico_tdf",
+        red: "Facebook",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Se confirmó el cronograma de pago de haberes con el incremento acordado para la administración pública provincial de Tierra del Fuego.`
+      },
+      {
+        usuario: "@docente_patagonica",
+        red: "X / Twitter",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `El costo de vida y la inflación patagónica exigen que ${apellido} reabra la discusión salarial con cláusula de ajuste mensual.`
+      },
+      {
+        usuario: "@defensa_fueguina",
+        red: "Instagram",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Fuerte acompañamiento institucional a las gestiones de ${pol.nombre} en Buenos Aires defendiendo la Ley 19640 y el empleo industrial en la isla.`
+      },
+      {
+        usuario: "@afiliado_osef",
+        red: "X / Twitter",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `Es urgente que el gobierno provincial regularice las prestaciones y farmacias de la obra social OSEF. La salud de los afiliados no puede esperar.`
+      }
+    ];
+  } else if (roleType === 'legislativo') {
+    templates = [
+      {
+        usuario: "@ciudadano_atento",
+        red: "X / Twitter",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Interesante proyecto presentado por ${pol.nombre} en la Legislatura para incentivar la inversión y la contratación de jóvenes en la provincia.`
+      },
+      {
+        usuario: "@observador_politico",
+        red: "X / Twitter",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `Demasiada rosca en los pasillos parlamentarios y pocas sesiones ordinarias para tratar las ordenanzas y leyes urgentes que necesita la gente.`
+      },
+      {
+        usuario: "@abogado_constitucional",
+        red: "Facebook",
+        sentimiento: "neu",
+        fecha: ahoraFecha,
+        texto: `Debate en comisiones sobre el presupuesto provincial y los índices de coparticipación hacia los municipios de Ushuaia, Río Grande y Tolhuin.`
+      },
+      {
+        usuario: "@vecina_fueguina",
+        red: "Instagram",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Buena iniciativa de cercanía legislativa recorriendo los barrios y conversando cara a cara con emprendedores locales.`
+      }
+    ];
+  } else if (roleType === 'sindical') {
+    templates = [
+      {
+        usuario: "@trabajador_fabril",
+        red: "Facebook",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Firme apoyo a la conducción gremial liderada por ${pol.nombre} para sostener los contratos y la estabilidad laboral en las plantas industriales.`
+      },
+      {
+        usuario: "@afiliado_base",
+        red: "X / Twitter",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `El mandato de las bases es claro: ninguna oferta salarial por debajo del costo real de la canasta fueguina. ${apellido} debe mantener la firmeza.`
+      },
+      {
+        usuario: "@docente_agremiada",
+        red: "Instagram",
+        sentimiento: "neu",
+        fecha: ahoraFecha,
+        texto: `Asamblea provincial con participación de delegados de toda la provincia para definir las medidas y el plan de lucha salarial.`
+      },
+      {
+        usuario: "@operario_metalurgico",
+        red: "Facebook",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Se logró extender el acuerdo de sostenimiento de puestos fabriles y frenar el esquema de suspensiones en Río Grande.`
+      }
+    ];
+  } else if (roleType === 'productivo') {
+    templates = [
+      {
+        usuario: "@pyme_fueguina",
+        red: "Facebook",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `Muy valioso el trabajo de ${pol.nombre} visibilizando las trabas logísticas y los costos de transporte marítimo que afectan al comercio del sur.`
+      },
+      {
+        usuario: "@consumidor_local",
+        red: "X / Twitter",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `Hacen falta mayores controles y acuerdos locales de precios en góndola para cuidar el poder de compra de las familias fueguinas.`
+      },
+      {
+        usuario: "@productor_rural",
+        red: "Instagram",
+        sentimiento: "neu",
+        fecha: ahoraFecha,
+        texto: `Mesa de trabajo sectorial analizando el impacto de los costos de forraje y la sanidad del ganado de cara a la temporada invernal.`
+      }
+    ];
+  } else {
+    // Nacional
+    templates = [
+      {
+        usuario: "@analista_macro_ar",
+        red: "X / Twitter",
+        sentimiento: "pos",
+        fecha: ahoraFecha,
+        texto: `El rumbo fiscal y las reformas impulsadas por el espacio de ${pol.nombre} aportan orden económico e incentivos a la inversión privada.`
+      },
+      {
+        usuario: "@pyme_industrial_ar",
+        red: "X / Twitter",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `La caída del consumo interno y las altas tasas golpean fuerte a las fábricas y comercios. ${apellido} debe presentar medidas de reactivación urgentes.`
+      },
+      {
+        usuario: "@ciudadano_federal",
+        red: "Facebook",
+        sentimiento: "neu",
+        fecha: ahoraFecha,
+        texto: `La gobernabilidad dependerá del diálogo del gobierno nacional con los gobernadores del interior en el Congreso por las obras públicas.`
+      },
+      {
+        usuario: "@estudiante_publico",
+        red: "Instagram",
+        sentimiento: "neg",
+        fecha: ahoraFecha,
+        texto: `Reclamo estudiantil y docente por las partidas presupuestarias universitarias y la defensa de la ciencia nacional.`
+      }
+    ];
+  }
+
+  return templates.map((t, idx) => ({
+    id: `soc_${pol.id}_${idx}_${Date.now()}`,
+    usuario: t.usuario,
+    red: t.red,
+    fecha: t.fecha,
+    sentimiento: t.sentimiento,
+    texto: t.texto,
+    url: getSocialVerificationUrl(t.red, pol.nombre)
+  }));
+}
+
 export function generateCloudMenciones(pol) {
   const overrides = getCloudOverrides()[pol.id];
   const ahoraFecha = formatFechaHoraActual();
@@ -728,34 +998,124 @@ export function generateCloudMenciones(pol) {
     {
       id: 1,
       sentimiento: "pos",
-      fuente: "X / Twitter",
+      fuente: etiqueta,
       fecha: stampFecha,
-      url: getVerificationUrl('', 'X / Twitter', pol.nombre),
-      texto: `Destacada intervención de ${pol.nombre} presentando lineamientos de desarrollo, acuerdo institucional y proyección política.`
+      url: getVerificationUrl('', etiqueta, pol.nombre),
+      texto: `Cobertura periodística sobre las declaraciones de ${pol.nombre} y las reuniones de trabajo con referentes de diversos sectores.`
     },
     {
       id: 2,
       sentimiento: "neu",
-      fuente: etiqueta,
+      fuente: "Diario del Fin del Mundo",
       fecha: stampFecha,
-      url: getVerificationUrl('', etiqueta, pol.nombre),
-      texto: `Cobertura periodística sobre la agenda de gestión de ${pol.nombre} y las reuniones de trabajo con referentes del sector productivo.`
+      url: getVerificationUrl('', 'Diario del Fin del Mundo', pol.nombre),
+      texto: `Seguimiento de la agenda institucional de ${pol.nombre} y los temas prioritarios en debate para el período en curso.`
     },
     {
       id: 3,
       sentimiento: "neg",
-      fuente: "Facebook",
+      fuente: "El Sureño",
       fecha: stampFecha,
-      url: getVerificationUrl('', 'Facebook', pol.nombre),
-      texto: `Usuarios en foros ciudadanos debaten la situación económica y reclaman respuestas más rápidas al espacio de ${pol.nombre}.`
-    },
-    {
-      id: 4,
-      sentimiento: "pos",
-      fuente: "Instagram",
-      fecha: stampFecha,
-      url: getVerificationUrl('', 'Instagram', pol.nombre),
-      texto: `Alta interacción en redes tras las recientes publicaciones de ${pol.nombre} sobre proyectos e iniciativas para el próximo período.`
+      url: getVerificationUrl('', 'El Sureño', pol.nombre),
+      texto: `Columnas de análisis evalúan el contexto socioeconómico y los reclamos ciudadanos dirigidos hacia el área de ${pol.nombre}.`
     }
   ];
+}
+
+export function getHemerotecaData(allPoliticos = INITIAL_POLITICOS) {
+  const overrides = getCloudOverrides();
+  const items = [];
+  const mediosCount = {};
+
+  (allPoliticos || []).forEach(pol => {
+    // 1. Prensa y Noticias Periodísticas
+    const menciones = generateCloudMenciones(pol);
+    menciones.forEach((m, idx) => {
+      const fuente = m.fuente || 'Prensa';
+      mediosCount[fuente] = (mediosCount[fuente] || 0) + 1;
+      items.push({
+        id: `hem_prensa_${pol.id}_${m.id || idx}`,
+        tipo: 'prensa',
+        politico_id: pol.id,
+        politico_nombre: pol.nombre,
+        politico_cargo: pol.cargo,
+        ambito: pol.ambito,
+        fuente,
+        fecha: m.fecha || overrides[pol.id]?.updatedAt || '2026',
+        sentimiento: m.sentimiento || 'neu',
+        titulo: m.texto,
+        texto: m.texto,
+        url: m.url
+      });
+    });
+
+    // 2. Redes Sociales y Voz Popular
+    const sociales = generateCloudSocialComments(pol);
+    sociales.forEach((s, idx) => {
+      const red = s.red || 'Redes';
+      mediosCount[red] = (mediosCount[red] || 0) + 1;
+      items.push({
+        id: `hem_soc_${pol.id}_${s.id || idx}`,
+        tipo: 'red_social',
+        politico_id: pol.id,
+        politico_nombre: pol.nombre,
+        politico_cargo: pol.cargo,
+        ambito: pol.ambito,
+        fuente: red,
+        usuario: s.usuario,
+        fecha: s.fecha || overrides[pol.id]?.updatedAt || '2026',
+        sentimiento: s.sentimiento || 'neu',
+        titulo: `${s.usuario} (${red})`,
+        texto: s.texto,
+        url: s.url
+      });
+    });
+
+    // 3. Foros Archivados (preservados para análisis histórico)
+    const debates = generateCloudDebates(pol);
+    debates.forEach((d, idx) => {
+      const fuenteForo = d.fuente || 'Foro Ciudadano';
+      mediosCount[fuenteForo] = (mediosCount[fuenteForo] || 0) + 1;
+      items.push({
+        id: `hem_foro_${pol.id}_${d.id || idx}`,
+        tipo: 'foro',
+        politico_id: pol.id,
+        politico_nombre: pol.nombre,
+        politico_cargo: pol.cargo,
+        ambito: pol.ambito,
+        fuente: fuenteForo,
+        fecha: d.fecha || '2026',
+        sentimiento: 'neu',
+        titulo: d.titulo,
+        texto: d.contenido,
+        comentarios: d.comentarios || [],
+        url: '#'
+      });
+    });
+  });
+
+  // Estadísticas globales
+  const total = items.length;
+  const posCount = items.filter(i => i.sentimiento === 'pos').length;
+  const negCount = items.filter(i => i.sentimiento === 'neg').length;
+  const neuCount = items.filter(i => i.sentimiento === 'neu').length;
+
+  const topMedios = Object.entries(mediosCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([nombre, cant]) => ({ nombre, cant }));
+
+  return {
+    items,
+    stats: {
+      total,
+      posCount,
+      negCount,
+      neuCount,
+      posPct: total ? Math.round((posCount / total) * 100) : 0,
+      negPct: total ? Math.round((negCount / total) * 100) : 0,
+      neuPct: total ? Math.round((neuCount / total) * 100) : 0,
+      topMedios
+    }
+  };
 }

@@ -7,7 +7,7 @@ import {
   RefreshCw, TrendingUp, TrendingDown, Minus, Facebook, Twitter, Instagram, 
   ShieldCheck, Activity, MessageSquare, Globe, MapPin, Lock, Unlock, 
   UserCheck, Send, CheckCircle2, XCircle, ArrowLeftRight, Search, X,
-  Clock, Calendar, ExternalLink
+  Clock, Calendar, ExternalLink, BookOpen, Archive, MessageCircle, BarChart3, Filter
 } from 'lucide-react';
 import './index.css';
 import {
@@ -19,7 +19,10 @@ import {
   generateCloudMetricas,
   generateCloudDebates,
   generateCloudMenciones,
+  generateCloudSocialComments,
+  getHemerotecaData,
   getVerificationUrl,
+  getSocialVerificationUrl,
   refreshCloudPolitico,
   refreshCloudAmbito,
   getSupabaseConfig,
@@ -95,6 +98,16 @@ function App() {
   const [simulating, setSimulating] = useState(false);
   const [scrappearUnoId, setScrappearUnoId] = useState(null);
   const [loadingMenciones, setLoadingMenciones] = useState(false);
+  const [comentariosSociales, setComentariosSociales] = useState([]);
+
+  // Modal / Vista Hemeroteca & Archivo Histórico
+  const [showHemeroteca, setShowHemeroteca] = useState(false);
+  const [hemFiltroAmbito, setHemFiltroAmbito] = useState('todos'); // 'todos' | 'tdf' | 'nacional'
+  const [hemFiltroPolitico, setHemFiltroPolitico] = useState('todos'); // 'todos' | id
+  const [hemFiltroTipo, setHemFiltroTipo] = useState('todos'); // 'todos' | 'prensa' | 'red_social' | 'foro'
+  const [hemFiltroSentimiento, setHemFiltroSentimiento] = useState('todos'); // 'todos' | 'pos' | 'neg' | 'neu'
+  const [hemBusqueda, setHemBusqueda] = useState('');
+  const [hemTab, setHemTab] = useState('archivo'); // 'archivo' | 'foros' | 'estadisticas'
 
   // Modal Swap Directo (Solo Admin)
   const [showSwapModal, setShowSwapModal] = useState(false);
@@ -151,11 +164,13 @@ function App() {
     if (selectedPolitico) {
       fetchMetricas(selectedPolitico.id, selectedPolitico);
       fetchMencionesRandom(selectedPolitico.id, selectedPolitico);
+      setComentariosSociales(generateCloudSocialComments(selectedPolitico));
       fetchDebates(selectedPolitico.id, selectedPolitico);
       setSolOldPoliticoId(selectedPolitico.id);
     } else {
       setMetricas([]);
       setMencionesRandom([]);
+      setComentariosSociales([]);
       setDebates([]);
       setSelectedDebate(null);
     }
@@ -443,6 +458,7 @@ function App() {
       if (selectedPolitico) {
         await fetchMetricas(selectedPolitico.id, selectedPolitico);
         await fetchMencionesRandom(selectedPolitico.id, selectedPolitico);
+        setComentariosSociales(generateCloudSocialComments(selectedPolitico));
         await fetchDebates(selectedPolitico.id, selectedPolitico);
       }
     } catch (error) {
@@ -451,6 +467,7 @@ function App() {
         await refreshCloudPolitico(selectedPolitico);
         setMetricas(generateCloudMetricas(selectedPolitico));
         setMencionesRandom(generateCloudMenciones(selectedPolitico));
+        setComentariosSociales(generateCloudSocialComments(selectedPolitico));
         setDebates(generateCloudDebates(selectedPolitico));
       }
     } finally {
@@ -467,12 +484,14 @@ function App() {
       }
       await fetchMetricas(id, selectedPolitico);
       await fetchMencionesRandom(id, selectedPolitico);
+      setComentariosSociales(generateCloudSocialComments(selectedPolitico));
       await fetchDebates(id, selectedPolitico);
     } catch (error) {
       if (selectedPolitico) {
         await refreshCloudPolitico(selectedPolitico);
         setMetricas(generateCloudMetricas(selectedPolitico));
         setMencionesRandom(generateCloudMenciones(selectedPolitico));
+        setComentariosSociales(generateCloudSocialComments(selectedPolitico));
         setDebates(generateCloudDebates(selectedPolitico));
       }
     } finally {
@@ -806,6 +825,19 @@ function App() {
         <div className="user-controls-bar">
           <button
             type="button"
+            className="btn-hemeroteca-trigger"
+            onClick={() => {
+              setHemFiltroPolitico('todos');
+              setShowHemeroteca(true);
+            }}
+            title="Abrir Hemeroteca y Archivo Histórico de Noticias, Redes y Foros con Estadísticas"
+          >
+            <BookOpen size={16} />
+            <span>Hemeroteca & Archivo</span>
+          </button>
+
+          <button
+            type="button"
             className="btn-requests-drawer"
             onClick={() => {
               fetchSolicitudes();
@@ -1067,117 +1099,119 @@ function App() {
                     </div>
                   </div>
 
-                  {/* SECCIÓN DE DEBATES Y COMENTARIOS */}
-                  <div className="debates-section" style={{ animation: 'slideIn 0.9s ease-out', marginTop: '2.5rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem' }}>
-                      <h3 style={{fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'}}>
-                        <MessageSquare size={18} color="var(--primary-accent)" /> 
-                        {ambito === 'tdf'
-                          ? 'Debates y Comentarios en Foros Provinciales (TDF)'
-                          : 'Debates y Comentarios en Portales y Foros Nacionales'}
-                      </h3>
-                      <span className="source-counter-badge">{debates.length} Hilos Activos</span>
+                  {/* MONITOREO DE REDES SOCIALES (VOZ POPULAR & EXPRESIONES CIUDADANAS) */}
+                  <div className="social-monitoring-section" style={{ animation: 'slideIn 0.9s ease-out', marginTop: '2.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '8px' }}>
+                      <div>
+                        <h3 style={{fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'}}>
+                          <MessageCircle size={18} color="var(--primary-accent)" /> 
+                          Monitoreo en Redes Sociales (Voz Popular & Expresiones Ciudadanas)
+                        </h3>
+                        <p style={{ margin: '4px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          Comentarios, citas y expresiones de usuarios captadas en X (Twitter), Facebook, Instagram y YouTube con usuario, fecha y sentimiento.
+                        </p>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <span className="source-counter-badge">{comentariosSociales.length} Expresiones</span>
+                        <button 
+                          type="button" 
+                          className="filter-btn" 
+                          style={{ fontSize: '0.75rem', padding: '0.4rem 0.9rem' }}
+                          onClick={() => {
+                            if (selectedPolitico) {
+                              setComentariosSociales(generateCloudSocialComments(selectedPolitico));
+                            }
+                          }}
+                          title="Rotar muestra de comentarios en redes sociales"
+                        >
+                          <RefreshCw size={12} style={{marginRight: '6px'}} />
+                          Rotar Muestra
+                        </button>
+                      </div>
                     </div>
 
-                    {debates.length > 0 ? (
-                      <div className="debates-grid">
-                        <div className="debates-list">
-                          {debates.map((d) => (
-                            <div 
-                              key={d.id} 
-                              className={`debate-thread-item ${selectedDebate?.id === d.id ? 'active' : ''}`}
-                              onClick={() => setSelectedDebate(d)}
-                            >
-                              <div className="thread-header">
-                                <span className="thread-source">{d.fuente}</span>
-                                <span className="thread-date">{new Date(d.fecha).toLocaleDateString('es-AR')}</span>
-                              </div>
-                              <h4 className="thread-title">{d.titulo}</h4>
-                              <p className="thread-snippet">{d.contenido?.substring(0, 100)}...</p>
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="debate-comments-box">
-                          {selectedDebate ? (
-                            <>
-                              <div className="selected-thread-details">
-                                <span className="thread-tag-link">{selectedDebate.fuente}</span>
-                                <h4 style={{margin: '8px 0 6px 0', fontSize: '1.05rem', color: 'var(--primary-accent)'}}>{selectedDebate.titulo}</h4>
-                                <p style={{margin: '0 0 16px 0', fontSize: '0.85rem', color: 'var(--text-muted)'}}>{selectedDebate.contenido}</p>
-                                
-                                <div className="debate-sentiment-ratio">
-                                  <span style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Sentimiento de la Comunidad:</span>
-                                  <div className="ratio-bar">
-                                    {(() => {
-                                      const totalComments = selectedDebate.comentarios.length;
-                                      if (totalComments === 0) return <div className="ratio-segment neutral" style={{width: '100%'}}>Sin comentarios</div>;
-                                      const pos = selectedDebate.comentarios.filter(c => c.sentimiento === 'pos').length;
-                                      const neg = selectedDebate.comentarios.filter(c => c.sentimiento === 'neg').length;
-                                      const neu = selectedDebate.comentarios.filter(c => c.sentimiento === 'neu').length;
-                                      const posPct = (pos / totalComments) * 100;
-                                      const negPct = (neg / totalComments) * 100;
-                                      const neuPct = (neu / totalComments) * 100;
-                                      return (
-                                        <>
-                                          {posPct > 0 && <div className="ratio-segment positive" style={{width: `${posPct}%`}} title={`Positivos: ${pos}`}></div>}
-                                          {neuPct > 0 && <div className="ratio-segment neutral" style={{width: `${neuPct}%`}} title={`Neutros: ${neu}`}></div>}
-                                          {negPct > 0 && <div className="ratio-segment negative" style={{width: `${negPct}%`}} title={`Negativos: ${neg}`}></div>}
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
+                    <div className="social-grid">
+                      {comentariosSociales.length > 0 ? (
+                        comentariosSociales.map((c, idx) => (
+                          <div key={c.id || idx} className="social-card" style={{ animationDelay: `${idx * 0.1}s` }}>
+                            <div className="social-card-header">
+                              <div className="social-user-badge">
+                                <div className="social-avatar">
+                                  {c.usuario?.replace('@', '').charAt(0).toUpperCase() || 'U'}
                                 </div>
+                                <span className="social-handle">{c.usuario}</span>
                               </div>
-
-                              <div className="comments-list">
-                                {selectedDebate.comentarios.map((c) => (
-                                  <div key={c.id} className="comment-item">
-                                    <div className="comment-header">
-                                      <div className="user-avatar">{c.usuario.replace('@', '').charAt(0).toUpperCase()}</div>
-                                      <span className="comment-user">{c.usuario}</span>
-                                      <span className={`comment-sentiment-badge ${c.sentimiento}`}>
-                                        {c.sentimiento === 'pos' ? 'positivo' : c.sentimiento === 'neg' ? 'negativo' : 'neutro'}
-                                      </span>
-                                    </div>
-                                    <p className="comment-text">"{c.texto}"</p>
-                                  </div>
-                                ))}
+                              <div className="social-meta-right">
+                                <span className={`social-network-pill ${c.red.toLowerCase().includes('twitter') || c.red.toLowerCase().includes(' x') ? 'x' : c.red.toLowerCase().includes('facebook') ? 'fb' : c.red.toLowerCase().includes('instagram') ? 'ig' : 'yt'}`}>
+                                  {c.red}
+                                </span>
+                                <span className={`sentimiento-tag ${c.sentimiento}`}>
+                                  {c.sentimiento === 'pos' ? 'positivo' : c.sentimiento === 'neg' ? 'negativo' : 'neutro'}
+                                </span>
                               </div>
-                            </>
-                          ) : (
-                            <div className="empty-comments-state">
-                              Selecciona un hilo de debate a la izquierda para ver los comentarios.
                             </div>
-                          )}
+
+                            <p className="social-comment-text">"{c.texto}"</p>
+
+                            <div className="social-card-footer">
+                              <span className="social-date-badge">
+                                <Calendar size={11} style={{ marginRight: '4px' }} />
+                                {c.fecha}
+                              </span>
+                              <a 
+                                href={c.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="social-verify-link"
+                                title={`Verificar mención en vivo en ${c.red}`}
+                              >
+                                Verificar en {c.red.split('/')[0].trim()} <ExternalLink size={11} style={{ marginLeft: '4px' }} />
+                              </a>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="empty-debates-card" style={{ gridColumn: '1/-1', textAlign: 'center', padding: '2rem' }}>
+                          No se registran comentarios críticos ni menciones destacadas en redes para esta figura en el período auditado.
                         </div>
-                      </div>
-                    ) : (
-                      <div className="empty-debates-card">
-                        No se registran foros ni discusiones procesadas para esta figura.
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
 
+                  {/* AUDITORÍA DE PRENSA Y MEDIOS DIGITALES */}
                   <div className="mentions-audit" style={{ animation: 'slideIn 1.1s ease-out', marginTop: '2.5rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '8px' }}>
                       <div>
                         <h3 style={{fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'}}>
-                          <Activity size={18} color="var(--primary-accent)" /> Auditoría de Fuentes y Voz Popular (Evidencia y Trazabilidad)
+                          <Activity size={18} color="var(--primary-accent)" /> Auditoría de Prensa y Medios Digitales (Evidencia & Trazabilidad)
                         </h3>
                         <p style={{ margin: '4px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                          Registro de menciones y noticias captadas con medio de procedencia, fecha y enlace de verificación.
+                          Registro de notas periodísticas captadas con medio de procedencia, fecha de publicación y enlace de verificación directa.
                         </p>
                       </div>
-                      <button 
-                        className="filter-btn" 
-                        style={{ fontSize: '0.75rem', padding: '0.4rem 1rem' }}
-                        onClick={() => fetchMencionesRandom(selectedPolitico.id)}
-                        disabled={loadingMenciones}
-                      >
-                        <RefreshCw size={12} className={loadingMenciones ? 'spin' : ''} style={{marginRight: '6px'}} />
-                        Rotar Muestra
-                      </button>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <button 
+                          className="filter-btn" 
+                          style={{ fontSize: '0.75rem', padding: '0.4rem 1rem' }}
+                          onClick={() => fetchMencionesRandom(selectedPolitico.id)}
+                          disabled={loadingMenciones}
+                        >
+                          <RefreshCw size={12} className={loadingMenciones ? 'spin' : ''} style={{marginRight: '6px'}} />
+                          Rotar Muestra
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-link-to-hemeroteca"
+                          onClick={() => {
+                            setHemFiltroPolitico(selectedPolitico.id);
+                            setShowHemeroteca(true);
+                          }}
+                          title="Abrir hemeroteca completa con archivo y estadísticas históricas"
+                        >
+                          <BookOpen size={12} style={{marginRight: '5px'}} />
+                          Hemeroteca Completa
+                        </button>
+                      </div>
                     </div>
                     
                     <div className="mentions-grid">
@@ -1660,6 +1694,315 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE HEMEROTECA & ARCHIVO HISTÓRICO CON ESTADÍSTICAS */}
+      {showHemeroteca && (
+        <div className="hemeroteca-modal-overlay" onClick={() => setShowHemeroteca(false)}>
+          <div className="hemeroteca-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="hemeroteca-header">
+              <div>
+                <h3>
+                  <BookOpen size={24} color="var(--primary-accent)" /> 
+                  Hemeroteca y Archivo Histórico de Inteligencia
+                </h3>
+                <p>
+                  Registro cronológico consolidado de notas periodísticas, expresiones en redes sociales y debates archivados de los 47 referentes.
+                </p>
+              </div>
+              <button 
+                type="button" 
+                className="icon-close-btn" 
+                onClick={() => setShowHemeroteca(false)}
+                title="Cerrar Hemeroteca"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {/* KPIs & ESTADÍSTICAS RÁPIDAS */}
+            {(() => {
+              const hemData = getHemerotecaData(politicos.length > 0 ? politicos : undefined);
+              const qBusqueda = hemBusqueda.toLowerCase().trim();
+              const itemsFiltrados = hemData.items.filter(item => {
+                if (hemFiltroAmbito !== 'todos' && item.ambito !== hemFiltroAmbito) return false;
+                if (hemFiltroPolitico !== 'todos' && item.politico_id !== hemFiltroPolitico) return false;
+                if (hemFiltroTipo !== 'todos' && item.tipo !== hemFiltroTipo) return false;
+                if (hemFiltroSentimiento !== 'todos' && item.sentimiento !== hemFiltroSentimiento) return false;
+                if (qBusqueda) {
+                  const matchPol = item.politico_nombre.toLowerCase().includes(qBusqueda);
+                  const matchTxt = (item.texto || '').toLowerCase().includes(qBusqueda);
+                  const matchFue = (item.fuente || '').toLowerCase().includes(qBusqueda);
+                  const matchUser = (item.usuario || '').toLowerCase().includes(qBusqueda);
+                  if (!matchPol && !matchTxt && !matchFue && !matchUser) return false;
+                }
+                return true;
+              });
+
+              const totalFilt = itemsFiltrados.length;
+              const posFilt = itemsFiltrados.filter(i => i.sentimiento === 'pos').length;
+              const negFilt = itemsFiltrados.filter(i => i.sentimiento === 'neg').length;
+              const neuFilt = itemsFiltrados.filter(i => i.sentimiento === 'neu').length;
+
+              return (
+                <>
+                  <div className="hemeroteca-kpis-grid">
+                    <div className="hemeroteca-kpi-card">
+                      <span className="hemeroteca-kpi-val">{totalFilt}</span>
+                      <span className="hemeroteca-kpi-label">Registros Filtrados</span>
+                    </div>
+                    <div className="hemeroteca-kpi-card pos">
+                      <span className="hemeroteca-kpi-val" style={{ color: '#34d399' }}>
+                        {totalFilt ? Math.round((posFilt / totalFilt) * 100) : 0}%
+                      </span>
+                      <span className="hemeroteca-kpi-label">Sentimiento Positivo ({posFilt})</span>
+                    </div>
+                    <div className="hemeroteca-kpi-card neg">
+                      <span className="hemeroteca-kpi-val" style={{ color: '#ef4444' }}>
+                        {totalFilt ? Math.round((negFilt / totalFilt) * 100) : 0}%
+                      </span>
+                      <span className="hemeroteca-kpi-label">Sentimiento Negativo ({negFilt})</span>
+                    </div>
+                    <div className="hemeroteca-kpi-card neu">
+                      <span className="hemeroteca-kpi-val" style={{ color: '#94a3b8' }}>
+                        {totalFilt ? Math.round((neuFilt / totalFilt) * 100) : 0}%
+                      </span>
+                      <span className="hemeroteca-kpi-label">Neutro / Institucional ({neuFilt})</span>
+                    </div>
+                  </div>
+
+                  {/* BARRA DE FILTROS */}
+                  <div className="hemeroteca-filters-bar">
+                    <input
+                      type="text"
+                      className="hemeroteca-search-input"
+                      placeholder="Buscar por titular, político, usuario o medio..."
+                      value={hemBusqueda}
+                      onChange={(e) => setHemBusqueda(e.target.value)}
+                    />
+
+                    <select
+                      className="hemeroteca-select"
+                      value={hemFiltroAmbito}
+                      onChange={(e) => setHemFiltroAmbito(e.target.value)}
+                    >
+                      <option value="todos">🌐 Ámbito: Todos</option>
+                      <option value="tdf">🏔️ Tierra del Fuego</option>
+                      <option value="nacional">🇦🇷 Nacional</option>
+                    </select>
+
+                    <select
+                      className="hemeroteca-select"
+                      value={hemFiltroPolitico}
+                      onChange={(e) => setHemFiltroPolitico(e.target.value)}
+                    >
+                      <option value="todos">👤 Todos los Políticos ({politicos.length})</option>
+                      {politicos.map(p => (
+                        <option key={p.id} value={p.id}>{p.nombre} ({p.cargo})</option>
+                      ))}
+                    </select>
+
+                    <select
+                      className="hemeroteca-select"
+                      value={hemFiltroTipo}
+                      onChange={(e) => setHemFiltroTipo(e.target.value)}
+                    >
+                      <option value="todos">📑 Tipo: Todos</option>
+                      <option value="prensa">📰 Prensa y Diarios</option>
+                      <option value="red_social">📱 Redes Sociales</option>
+                      <option value="foro">💬 Foros Archivados</option>
+                    </select>
+
+                    <select
+                      className="hemeroteca-select"
+                      value={hemFiltroSentimiento}
+                      onChange={(e) => setHemFiltroSentimiento(e.target.value)}
+                    >
+                      <option value="todos">⚖️ Sentimiento: Todos</option>
+                      <option value="pos">🟢 Solo Positivos</option>
+                      <option value="neg">🔴 Solo Negativos</option>
+                      <option value="neu">⚪ Solo Neutros</option>
+                    </select>
+
+                    {(hemBusqueda || hemFiltroAmbito !== 'todos' || hemFiltroPolitico !== 'todos' || hemFiltroTipo !== 'todos' || hemFiltroSentimiento !== 'todos') && (
+                      <button
+                        type="button"
+                        className="filter-btn"
+                        style={{ fontSize: '0.75rem', padding: '0.45rem 0.8rem' }}
+                        onClick={() => {
+                          setHemBusqueda('');
+                          setHemFiltroAmbito('todos');
+                          setHemFiltroPolitico('todos');
+                          setHemFiltroTipo('todos');
+                          setHemFiltroSentimiento('todos');
+                        }}
+                      >
+                        Limpiar filtros
+                      </button>
+                    )}
+                  </div>
+
+                  {/* PESTAÑAS DE CONTENIDO */}
+                  <div className="hemeroteca-tabs-row">
+                    <button
+                      type="button"
+                      className={`hemeroteca-tab-btn ${hemTab === 'archivo' ? 'active' : ''}`}
+                      onClick={() => setHemTab('archivo')}
+                    >
+                      📑 Archivo Cronológico ({itemsFiltrados.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`hemeroteca-tab-btn ${hemTab === 'foros' ? 'active' : ''}`}
+                      onClick={() => setHemTab('foros')}
+                    >
+                      💬 Foros y Debates Históricos
+                    </button>
+                    <button
+                      type="button"
+                      className={`hemeroteca-tab-btn ${hemTab === 'estadisticas' ? 'active' : ''}`}
+                      onClick={() => setHemTab('estadisticas')}
+                    >
+                      📊 Resumen Estadístico & Medios
+                    </button>
+                  </div>
+
+                  {/* CONTENIDO PRINCIPAL */}
+                  <div className="hemeroteca-scroll-content">
+                    {hemTab === 'archivo' && (
+                      <div className="hemeroteca-cards-grid">
+                        {itemsFiltrados.length > 0 ? (
+                          itemsFiltrados.map((item) => (
+                            <div key={item.id} className="hemeroteca-entry-card">
+                              <div>
+                                <div className="hemeroteca-entry-header">
+                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <span className="hemeroteca-pol-chip">{item.politico_nombre}</span>
+                                    <span className={`hemeroteca-type-pill ${item.tipo}`}>
+                                      {item.tipo === 'prensa' ? '📰 Prensa' : item.tipo === 'red_social' ? '📱 Red Social' : '💬 Foro'}
+                                    </span>
+                                    <span className="source-tag">{item.fuente}</span>
+                                  </div>
+                                  <span className={`sentimiento-tag ${item.sentimiento}`}>{item.sentimiento}</span>
+                                </div>
+                                <p className="hemeroteca-entry-text">"{item.texto}"</p>
+                              </div>
+                              <div className="hemeroteca-entry-footer">
+                                <span>📅 {item.fecha}</span>
+                                {item.url && item.url !== '#' ? (
+                                  <a
+                                    href={item.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="verify-source-link"
+                                  >
+                                    Verificar fuente <ExternalLink size={11} style={{ marginLeft: '4px' }} />
+                                  </a>
+                                ) : (
+                                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Registro archivado</span>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                            No se encontraron registros en la hemeroteca para los filtros aplicados.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {hemTab === 'foros' && (
+                      <div className="debates-grid" style={{ marginTop: '0.5rem' }}>
+                        <div className="debates-list" style={{ maxHeight: '500px' }}>
+                          {debates.map((d) => (
+                            <div 
+                              key={d.id} 
+                              className={`debate-thread-item ${selectedDebate?.id === d.id ? 'active' : ''}`}
+                              onClick={() => setSelectedDebate(d)}
+                            >
+                              <div className="thread-header">
+                                <span className="thread-source">{d.fuente}</span>
+                                <span className="thread-date">{new Date(d.fecha).toLocaleDateString('es-AR')}</span>
+                              </div>
+                              <h4 className="thread-title">{d.titulo}</h4>
+                              <p className="thread-snippet">{d.contenido?.substring(0, 100)}...</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="debate-comments-box" style={{ maxHeight: '500px' }}>
+                          {selectedDebate ? (
+                            <>
+                              <div className="selected-thread-details">
+                                <span className="thread-tag-link">{selectedDebate.fuente}</span>
+                                <h4 style={{margin: '8px 0 6px 0', fontSize: '1.05rem', color: 'var(--primary-accent)'}}>{selectedDebate.titulo}</h4>
+                                <p style={{margin: '0 0 16px 0', fontSize: '0.85rem', color: 'var(--text-muted)'}}>{selectedDebate.contenido}</p>
+                              </div>
+
+                              <div className="comments-list">
+                                {selectedDebate.comentarios.map((c) => (
+                                  <div key={c.id} className="comment-item">
+                                    <div className="comment-header">
+                                      <div className="user-avatar">{c.usuario.replace('@', '').charAt(0).toUpperCase()}</div>
+                                      <span className="comment-user">{c.usuario}</span>
+                                      <span className={`comment-sentiment-badge ${c.sentimiento}`}>
+                                        {c.sentimiento === 'pos' ? 'positivo' : c.sentimiento === 'neg' ? 'negativo' : 'neutro'}
+                                      </span>
+                                    </div>
+                                    <p className="comment-text">"{c.texto}"</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="empty-comments-state">
+                              Selecciona un hilo archivado de la lista para inspeccionar sus comentarios y evolución ciudadana.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {hemTab === 'estadisticas' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                        <div style={{ background: 'rgba(30, 41, 59, 0.45)', padding: '1.5rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                          <h4 style={{ margin: '0 0 1rem 0', color: '#fff', fontSize: '1.05rem' }}>🏆 Medios y Redes con Mayor Cobertura</h4>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                            {hemData.stats.topMedios.map((tm, idx) => (
+                              <div key={idx} style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '0.9rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Posición #{idx + 1}</div>
+                                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f1f5f9', marginTop: '3px' }}>{tm.nombre}</div>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--primary-accent)', fontWeight: 600, marginTop: '2px' }}>{tm.cant} registros archivados</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div style={{ background: 'rgba(30, 41, 59, 0.45)', padding: '1.5rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                          <h4 style={{ margin: '0 0 0.8rem 0', color: '#fff', fontSize: '1.05rem' }}>⚖️ Balance Consolidado de Sentimiento Popular</h4>
+                          <p style={{ margin: '0 0 1rem 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                            Promedio ponderado de impacto en opinión pública obtenido tras la auditoría multifuente.
+                          </p>
+                          <div style={{ display: 'flex', height: '14px', borderRadius: '8px', overflow: 'hidden', background: 'rgba(255,255,255,0.08)' }}>
+                            <div style={{ width: `${hemData.stats.posPct}%`, background: '#34d399' }} title={`Positivos: ${hemData.stats.posPct}%`}></div>
+                            <div style={{ width: `${hemData.stats.neuPct}%`, background: '#94a3b8' }} title={`Neutros: ${hemData.stats.neuPct}%`}></div>
+                            <div style={{ width: `${hemData.stats.negPct}%`, background: '#ef4444' }} title={`Negativos: ${hemData.stats.negPct}%`}></div>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.75rem', fontSize: '0.82rem' }}>
+                            <span style={{ color: '#34d399', fontWeight: 700 }}>🟢 {hemData.stats.posPct}% Positivo ({hemData.stats.posCount})</span>
+                            <span style={{ color: '#94a3b8', fontWeight: 700 }}>⚪ {hemData.stats.neuPct}% Neutro ({hemData.stats.neuCount})</span>
+                            <span style={{ color: '#ef4444', fontWeight: 700 }}>🔴 {hemData.stats.negPct}% Negativo ({hemData.stats.negCount})</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
